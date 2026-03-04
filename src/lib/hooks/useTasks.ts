@@ -41,7 +41,7 @@ export function useTasks(userId: string, selectedDate?: string) {
       .select("*")
       .eq("user_id", userId)
       .eq("date", date)
-      .order("id", { ascending: true });
+      .order("start_time", { ascending: true });
 
     if (error) {
       console.error("Failed to fetch tasks:", error);
@@ -72,7 +72,10 @@ export function useTasks(userId: string, selectedDate?: string) {
             if (row.date === date) {
               setCards((prev) => {
                 if (prev.some((c) => c.id === row.id)) return prev;
-                return [...prev, dbToCard(row)];
+                const newCard = dbToCard(row);
+                const next = [...prev, newCard];
+                next.sort((a, b) => a.startTime.localeCompare(b.startTime));
+                return next;
               });
             }
           } else if (payload.eventType === "UPDATE") {
@@ -110,8 +113,12 @@ export function useTasks(userId: string, selectedDate?: string) {
         end_time: task.endTime,
         date,
       };
-      // Optimistic update
-      setCards((prev) => [...prev, { ...task, date }]);
+      // Optimistic update (sorted by startTime)
+      setCards((prev) => {
+        const next = [...prev, { ...task, date }];
+        next.sort((a, b) => a.startTime.localeCompare(b.startTime));
+        return next;
+      });
 
       const { error } = await supabase.from("daystack_tasks").insert(row);
       if (error) {
@@ -124,22 +131,33 @@ export function useTasks(userId: string, selectedDate?: string) {
   );
 
   const updateTask = useCallback(
-    async (id: number, updates: Partial<Pick<TaskCard, "title" | "category" | "minutes">>) => {
+    async (id: number, updates: Partial<Pick<TaskCard, "title" | "category" | "minutes" | "startTime" | "endTime">>) => {
       const supabase = createClient();
-      // Optimistic update
-      setCards((prev) =>
-        prev.map((c) => (c.id === id ? { ...c, ...updates } : c))
-      );
+      // Optimistic update (re-sort if time changed)
+      setCards((prev) => {
+        const next = prev.map((c) => (c.id === id ? { ...c, ...updates } : c));
+        if (updates.startTime !== undefined) {
+          next.sort((a, b) => a.startTime.localeCompare(b.startTime));
+        }
+        return next;
+      });
+
+      // Map camelCase to snake_case for DB
+      const dbUpdates: Record<string, unknown> = {};
+      if (updates.title !== undefined) dbUpdates.title = updates.title;
+      if (updates.category !== undefined) dbUpdates.category = updates.category;
+      if (updates.minutes !== undefined) dbUpdates.minutes = updates.minutes;
+      if (updates.startTime !== undefined) dbUpdates.start_time = updates.startTime;
+      if (updates.endTime !== undefined) dbUpdates.end_time = updates.endTime;
 
       const { error } = await supabase
         .from("daystack_tasks")
-        .update(updates)
+        .update(dbUpdates)
         .eq("id", id)
         .eq("user_id", userId);
 
       if (error) {
         console.error("Failed to update task:", error);
-        // Re-fetch on error
         fetchTasks();
       }
     },
@@ -185,7 +203,7 @@ export function useTasks(userId: string, selectedDate?: string) {
       .eq("user_id", userId)
       .gte("date", mondayStr)
       .lte("date", fridayStr)
-      .order("id", { ascending: true });
+      .order("start_time", { ascending: true });
 
     if (error) {
       console.error("Failed to fetch week tasks:", error);

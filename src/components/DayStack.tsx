@@ -53,6 +53,9 @@ export default function DayStack({ userId }: DayStackProps) {
   const [hoveredCard, setHoveredCard] = useState<number | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editTitle, setEditTitle] = useState("");
+  const [editCategory, setEditCategory] = useState("");
+  const [editStart, setEditStart] = useState("");
+  const [editEnd, setEditEnd] = useState("");
 
   // Weekly data
   const [weekTasks, setWeekTasks] = useState<TaskCard[]>([]);
@@ -173,10 +176,28 @@ export default function DayStack({ userId }: DayStackProps) {
   const startEdit = (card: TaskCard) => {
     setEditingId(card.id);
     setEditTitle(card.title);
+    setEditCategory(card.category);
+    setEditStart(card.startTime);
+    setEditEnd(card.endTime);
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
   };
 
   const saveEdit = (id: number) => {
-    updateTask(id, { title: editTitle });
+    const [sh, sm] = editStart.split(":").map(Number);
+    const [eh, em] = editEnd.split(":").map(Number);
+    let diff = (eh * 60 + em) - (sh * 60 + sm);
+    if (diff <= 0) diff += 24 * 60;
+    const minutes = Math.max(1, diff);
+    updateTask(id, {
+      title: editTitle.trim() || getCat(editCategory).label,
+      category: editCategory,
+      startTime: editStart,
+      endTime: editEnd,
+      minutes,
+    });
     setEditingId(null);
   };
 
@@ -553,6 +574,108 @@ export default function DayStack({ userId }: DayStackProps) {
                 const cat = getCat(card.category);
                 const isHovered = hoveredCard === card.id;
                 const isEditing = editingId === card.id;
+
+                if (isEditing) {
+                  const editCat = getCat(editCategory);
+                  return (
+                    <div
+                      key={card.id}
+                      style={{
+                        padding: 16, borderRadius: 14,
+                        background: "rgba(255,255,255,0.04)",
+                        border: `1px solid ${editCat.color}33`,
+                      }}
+                    >
+                      {/* Category pills */}
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 10 }}>
+                        {categories.map((c) => (
+                          <button
+                            key={c.id}
+                            onClick={() => setEditCategory(c.id)}
+                            style={{
+                              padding: "4px 10px", borderRadius: 14, border: "none",
+                              cursor: "pointer", fontSize: 11, fontWeight: 600,
+                              transition: "all 0.2s",
+                              background: editCategory === c.id ? c.color + "25" : "rgba(255,255,255,0.04)",
+                              color: editCategory === c.id ? c.color : "#666",
+                            }}
+                          >
+                            {c.icon} {c.label}
+                          </button>
+                        ))}
+                      </div>
+                      {/* Title */}
+                      <input
+                        value={editTitle}
+                        onChange={(e) => setEditTitle(e.target.value)}
+                        placeholder="タスク名（省略可）"
+                        autoFocus
+                        style={{
+                          width: "100%", padding: "8px 12px", borderRadius: 10,
+                          border: `1px solid ${editCat.color}33`,
+                          background: "rgba(0,0,0,0.3)", color: "#fff",
+                          fontSize: 13, outline: "none", marginBottom: 10, boxSizing: "border-box",
+                        }}
+                      />
+                      {/* Time inputs */}
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+                        <input
+                          type="time"
+                          value={editStart}
+                          onChange={(e) => setEditStart(e.target.value)}
+                          style={{
+                            flex: 1, padding: "7px 10px", borderRadius: 10,
+                            border: "1px solid rgba(255,255,255,0.08)",
+                            background: "rgba(0,0,0,0.3)", color: "#fff",
+                            fontSize: 13, outline: "none",
+                          }}
+                        />
+                        <span style={{ color: "#555", fontSize: 13 }}>→</span>
+                        <input
+                          type="time"
+                          value={editEnd}
+                          onChange={(e) => setEditEnd(e.target.value)}
+                          style={{
+                            flex: 1, padding: "7px 10px", borderRadius: 10,
+                            border: "1px solid rgba(255,255,255,0.08)",
+                            background: "rgba(0,0,0,0.3)", color: "#fff",
+                            fontSize: 13, outline: "none",
+                          }}
+                        />
+                      </div>
+                      {/* Actions */}
+                      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                        <button
+                          onClick={cancelEdit}
+                          style={{
+                            padding: "7px 14px", borderRadius: 10, border: "none",
+                            background: "rgba(255,255,255,0.06)", color: "#888",
+                            fontSize: 12, fontWeight: 600, cursor: "pointer",
+                          }}
+                        >
+                          キャンセル
+                        </button>
+                        <button
+                          onClick={() => saveEdit(card.id)}
+                          disabled={!editStart || !editEnd}
+                          style={{
+                            padding: "7px 18px", borderRadius: 10, border: "none",
+                            background: editStart && editEnd
+                              ? "linear-gradient(135deg, #4ECDC4, #44B09E)"
+                              : "rgba(255,255,255,0.06)",
+                            color: editStart && editEnd ? "#000" : "#555",
+                            fontSize: 12, fontWeight: 700,
+                            cursor: editStart && editEnd ? "pointer" : "default",
+                            transition: "all 0.2s",
+                          }}
+                        >
+                          保存
+                        </button>
+                      </div>
+                    </div>
+                  );
+                }
+
                 return (
                   <div
                     key={card.id}
@@ -573,31 +696,14 @@ export default function DayStack({ userId }: DayStackProps) {
                       }}
                     />
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      {isEditing ? (
-                        <input
-                          value={editTitle}
-                          onChange={(e) => setEditTitle(e.target.value)}
-                          onBlur={() => saveEdit(card.id)}
-                          onKeyDown={(e) => e.key === "Enter" && saveEdit(card.id)}
-                          autoFocus
-                          style={{
-                            width: "100%", background: "rgba(0,0,0,0.3)",
-                            border: `1px solid ${cat.color}44`,
-                            borderRadius: 6, padding: "4px 8px",
-                            color: "#fff", fontSize: 13, outline: "none", boxSizing: "border-box",
-                          }}
-                        />
-                      ) : (
-                        <div
-                          onClick={() => startEdit(card)}
-                          style={{
-                            fontSize: 13, fontWeight: 600, cursor: "text",
-                            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-                          }}
-                        >
-                          {card.title}
-                        </div>
-                      )}
+                      <div
+                        style={{
+                          fontSize: 13, fontWeight: 600,
+                          whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                        }}
+                      >
+                        {card.title}
+                      </div>
                       <div style={{ display: "flex", gap: 8, fontSize: 11, color: "#666", marginTop: 2 }}>
                         <span style={{ color: cat.color + "bb" }}>{cat.label}</span>
                         <span>
@@ -607,7 +713,22 @@ export default function DayStack({ userId }: DayStackProps) {
                       </div>
                     </div>
                     <button
+                      onClick={() => startEdit(card)}
+                      title="編集"
+                      style={{
+                        width: 22, height: 22, borderRadius: 6, border: "none",
+                        background: isHovered ? "rgba(78,205,196,0.12)" : "transparent",
+                        color: isHovered ? "#4ECDC4" : "transparent",
+                        cursor: "pointer", fontSize: 12,
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        transition: "all 0.2s", flexShrink: 0,
+                      }}
+                    >
+                      ✎
+                    </button>
+                    <button
                       onClick={() => removeCard(card.id)}
+                      title="削除"
                       style={{
                         width: 22, height: 22, borderRadius: 6, border: "none",
                         background: isHovered ? "rgba(255,107,107,0.12)" : "transparent",
