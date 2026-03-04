@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import {
   Category, TaskCard,
   fmtTime, fmtMin, getCatFromList, buildCatSummary, todayStr,
@@ -8,6 +8,7 @@ import {
 import { useAuth } from "@/lib/hooks/useAuth";
 import { useCategories } from "@/lib/hooks/useCategories";
 import { useTasks } from "@/lib/hooks/useTasks";
+import { shareToTwitter, copyShareImage } from "@/lib/shareUtils";
 import TimerRing from "@/components/TimerRing";
 import ShareImage from "@/components/ShareImage";
 import CategoryEditor from "@/components/CategoryEditor";
@@ -41,6 +42,13 @@ export default function DayStack({ userId }: DayStackProps) {
   const [timerStartTime, setTimerStartTime] = useState<Date | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Manual entry
+  const [showManual, setShowManual] = useState(false);
+  const [manualTitle, setManualTitle] = useState("");
+  const [manualCategory, setManualCategory] = useState("deepwork");
+  const [manualStart, setManualStart] = useState("");
+  const [manualEnd, setManualEnd] = useState("");
+
   // Card interaction
   const [hoveredCard, setHoveredCard] = useState<number | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -48,6 +56,34 @@ export default function DayStack({ userId }: DayStackProps) {
 
   // Weekly data
   const [weekTasks, setWeekTasks] = useState<TaskCard[]>([]);
+
+  // Share
+  const shareRef = useRef<HTMLDivElement>(null);
+  const [shareStatus, setShareStatus] = useState<string | null>(null);
+
+  const handleShareTwitter = useCallback(async () => {
+    if (!shareRef.current) return;
+    setShareStatus("画像を準備中...");
+    try {
+      await shareToTwitter(shareRef.current);
+      setShareStatus("画像をダウンロードしました");
+    } catch {
+      setShareStatus("エラーが発生しました");
+    }
+    setTimeout(() => setShareStatus(null), 3000);
+  }, []);
+
+  const handleCopy = useCallback(async () => {
+    if (!shareRef.current) return;
+    setShareStatus("コピー中...");
+    try {
+      const copied = await copyShareImage(shareRef.current);
+      setShareStatus(copied ? "コピーしました ✓" : "画像をダウンロードしました");
+    } catch {
+      setShareStatus("エラーが発生しました");
+    }
+    setTimeout(() => setShareStatus(null), 3000);
+  }, []);
 
   // Pulse animation
   const [pulse, setPulse] = useState(false);
@@ -86,9 +122,14 @@ export default function DayStack({ userId }: DayStackProps) {
 
   const stopTimer = () => {
     setIsRunning(false);
-    const minutes = Math.max(1, Math.round(elapsed / 60));
+    const now = new Date();
+    // elapsed state はクロージャの問題で古い値になりうるため、壁時計から算出
+    const realSec = timerStartTime
+      ? Math.round((now.getTime() - timerStartTime.getTime()) / 1000)
+      : elapsed;
+    const minutes = Math.max(1, Math.round(realSec / 60));
     const startStr = timerStartTime ? timerStartTime.toTimeString().slice(0, 5) : "--:--";
-    const endStr = new Date().toTimeString().slice(0, 5);
+    const endStr = now.toTimeString().slice(0, 5);
     const cat = getCat(timerCategory);
     const newTask = {
       id: Date.now(),
@@ -102,6 +143,29 @@ export default function DayStack({ userId }: DayStackProps) {
     setTimerTitle("");
     setElapsed(0);
     setTimerStartTime(null);
+  };
+
+  const submitManual = () => {
+    if (!manualStart || !manualEnd) return;
+    const [sh, sm] = manualStart.split(":").map(Number);
+    const [eh, em] = manualEnd.split(":").map(Number);
+    let diff = (eh * 60 + em) - (sh * 60 + sm);
+    if (diff <= 0) diff += 24 * 60; // 日跨ぎ
+    const minutes = Math.max(1, diff);
+    const cat = getCat(manualCategory);
+    addTask({
+      id: Date.now(),
+      title: manualTitle.trim() || cat.label,
+      category: manualCategory,
+      minutes,
+      startTime: manualStart,
+      endTime: manualEnd,
+    });
+    setManualTitle("");
+    setManualCategory("deepwork");
+    setManualStart("");
+    setManualEnd("");
+    setShowManual(false);
   };
 
   const removeCard = (id: number) => deleteTask(id);
@@ -370,8 +434,118 @@ export default function DayStack({ userId }: DayStackProps) {
             {/* Records header */}
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
               <span style={{ fontSize: 12, color: "#666", fontWeight: 600, letterSpacing: 0.5 }}>今日の記録</span>
-              <span style={{ fontSize: 11, color: "#444" }}>{cards.length}件</span>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 11, color: "#444" }}>{cards.length}件</span>
+                <button
+                  onClick={() => setShowManual((v) => !v)}
+                  style={{
+                    padding: "4px 10px", borderRadius: 8, border: "none",
+                    background: showManual ? "rgba(78,205,196,0.15)" : "rgba(255,255,255,0.06)",
+                    color: showManual ? "#4ECDC4" : "#888",
+                    fontSize: 11, fontWeight: 600, cursor: "pointer",
+                    transition: "all 0.2s",
+                  }}
+                >
+                  ＋ 手動で追加
+                </button>
+              </div>
             </div>
+
+            {/* Manual entry form */}
+            {showManual && (
+              <div
+                style={{
+                  marginBottom: 12, padding: 16, borderRadius: 14,
+                  background: "rgba(255,255,255,0.03)",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                }}
+              >
+                {/* Category pills */}
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 12 }}>
+                  {categories.map((cat) => (
+                    <button
+                      key={cat.id}
+                      onClick={() => setManualCategory(cat.id)}
+                      style={{
+                        padding: "5px 10px", borderRadius: 14, border: "none",
+                        cursor: "pointer", fontSize: 11, fontWeight: 600,
+                        transition: "all 0.2s",
+                        background: manualCategory === cat.id ? cat.color + "25" : "rgba(255,255,255,0.04)",
+                        color: manualCategory === cat.id ? cat.color : "#666",
+                      }}
+                    >
+                      {cat.icon} {cat.label}
+                    </button>
+                  ))}
+                </div>
+                {/* Title */}
+                <input
+                  value={manualTitle}
+                  onChange={(e) => setManualTitle(e.target.value)}
+                  placeholder="タスク名（省略可）"
+                  style={{
+                    width: "100%", padding: "9px 12px", borderRadius: 10,
+                    border: "1px solid rgba(255,255,255,0.08)",
+                    background: "rgba(0,0,0,0.3)", color: "#fff",
+                    fontSize: 13, outline: "none", marginBottom: 10, boxSizing: "border-box",
+                  }}
+                />
+                {/* Time inputs */}
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+                  <input
+                    type="time"
+                    value={manualStart}
+                    onChange={(e) => setManualStart(e.target.value)}
+                    style={{
+                      flex: 1, padding: "8px 10px", borderRadius: 10,
+                      border: "1px solid rgba(255,255,255,0.08)",
+                      background: "rgba(0,0,0,0.3)", color: "#fff",
+                      fontSize: 13, outline: "none",
+                    }}
+                  />
+                  <span style={{ color: "#555", fontSize: 13 }}>→</span>
+                  <input
+                    type="time"
+                    value={manualEnd}
+                    onChange={(e) => setManualEnd(e.target.value)}
+                    style={{
+                      flex: 1, padding: "8px 10px", borderRadius: 10,
+                      border: "1px solid rgba(255,255,255,0.08)",
+                      background: "rgba(0,0,0,0.3)", color: "#fff",
+                      fontSize: 13, outline: "none",
+                    }}
+                  />
+                </div>
+                {/* Actions */}
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                  <button
+                    onClick={() => { setShowManual(false); setManualTitle(""); setManualStart(""); setManualEnd(""); }}
+                    style={{
+                      padding: "8px 16px", borderRadius: 10, border: "none",
+                      background: "rgba(255,255,255,0.06)", color: "#888",
+                      fontSize: 12, fontWeight: 600, cursor: "pointer",
+                    }}
+                  >
+                    キャンセル
+                  </button>
+                  <button
+                    onClick={submitManual}
+                    disabled={!manualStart || !manualEnd}
+                    style={{
+                      padding: "8px 20px", borderRadius: 10, border: "none",
+                      background: manualStart && manualEnd
+                        ? "linear-gradient(135deg, #4ECDC4, #44B09E)"
+                        : "rgba(255,255,255,0.06)",
+                      color: manualStart && manualEnd ? "#000" : "#555",
+                      fontSize: 12, fontWeight: 700, cursor: manualStart && manualEnd ? "pointer" : "default",
+                      transition: "all 0.2s",
+                    }}
+                  >
+                    追加
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Card list */}
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -633,25 +807,38 @@ export default function DayStack({ userId }: DayStackProps) {
               <div style={{ fontSize: 14, color: "#ccc", marginBottom: 4 }}>今日のDayStackをシェア</div>
               <div style={{ fontSize: 12, color: "#555" }}>画像を長押しまたは右クリックで保存</div>
             </div>
-            <ShareImage cards={cards} dateStr={dateStr} categories={categories} />
-            <div style={{ display: "flex", gap: 12, marginTop: 28 }}>
-              {[
-                { label: "𝕏 でシェア", bg: "#1a1a2e", color: "#fff" },
-                { label: "コピー", bg: "rgba(255,255,255,0.08)", color: "#ccc" },
-              ].map((btn, i) => (
-                <button
-                  key={i}
-                  style={{
-                    padding: "12px 28px", borderRadius: 12,
-                    border: "1px solid rgba(255,255,255,0.1)",
-                    background: btn.bg, color: btn.color,
-                    fontSize: 14, fontWeight: 600, cursor: "pointer",
-                  }}
-                >
-                  {btn.label}
-                </button>
-              ))}
+            <div ref={shareRef}>
+              <ShareImage cards={cards} dateStr={dateStr} categories={categories} />
             </div>
+            <div style={{ display: "flex", gap: 12, marginTop: 28 }}>
+              <button
+                onClick={handleShareTwitter}
+                style={{
+                  padding: "12px 28px", borderRadius: 12,
+                  border: "1px solid rgba(255,255,255,0.1)",
+                  background: "#1a1a2e", color: "#fff",
+                  fontSize: 14, fontWeight: 600, cursor: "pointer",
+                }}
+              >
+                𝕏 でシェア
+              </button>
+              <button
+                onClick={handleCopy}
+                style={{
+                  padding: "12px 28px", borderRadius: 12,
+                  border: "1px solid rgba(255,255,255,0.1)",
+                  background: "rgba(255,255,255,0.08)", color: "#ccc",
+                  fontSize: 14, fontWeight: 600, cursor: "pointer",
+                }}
+              >
+                コピー
+              </button>
+            </div>
+            {shareStatus && (
+              <div style={{ marginTop: 12, fontSize: 13, color: "#4ECDC4", fontWeight: 600 }}>
+                {shareStatus}
+              </div>
+            )}
             <div style={{ marginTop: 40, width: "100%" }}>
               <WeeklyDNA categories={categories} weekTasks={weekTasks} />
             </div>
