@@ -1,48 +1,152 @@
 "use client";
 
+import { useEffect, useRef } from "react";
+
 interface TimerRingProps {
   elapsed: number;
   isRunning: boolean;
   color: string;
 }
 
+function hexToRgb(hex: string): [number, number, number] {
+  const h = hex.replace("#", "");
+  return [
+    parseInt(h.substring(0, 2), 16),
+    parseInt(h.substring(2, 4), 16),
+    parseInt(h.substring(4, 6), 16),
+  ];
+}
+
 export default function TimerRing({ elapsed, isRunning, color }: TimerRingProps) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const animRef = useRef<number>(0);
+  const spinStartRef = useRef<number>(0);
+
+  // Record when spinning starts so particle begins at 12 o'clock
+  useEffect(() => {
+    if (isRunning) {
+      spinStartRef.current = performance.now();
+    }
+  }, [isRunning]);
+
   const maxSec = 3600;
-  const progress = Math.min(elapsed / maxSec, 1);
+  const size = 200;
+  const cx = size / 2;
+  const cy = size / 2;
   const r = 88;
-  const circ = 2 * Math.PI * r;
-  const offset = circ * (1 - progress);
+  const lineW = 6;
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    // High DPI
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = size * dpr;
+    canvas.height = size * dpr;
+    ctx.scale(dpr, dpr);
+
+    const [cr, cg, cb] = hexToRgb(color);
+    const startAngle = -Math.PI / 2;
+
+    let prevTime = performance.now();
+
+    const draw = (now: number) => {
+      const dt = now - prevTime;
+      prevTime = now;
+      void dt;
+
+      ctx.clearRect(0, 0, size, size);
+
+      // Background track
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.strokeStyle = "rgba(255,255,255,0.04)";
+      ctx.lineWidth = lineW;
+      ctx.stroke();
+
+      const progress = Math.min(elapsed / maxSec, 1);
+      const progressAngle = startAngle + progress * Math.PI * 2;
+
+      if (elapsed > 0) {
+        // Accumulated glow (outer blur)
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, startAngle, progressAngle);
+        ctx.strokeStyle = `rgba(${cr},${cg},${cb},0.15)`;
+        ctx.lineWidth = 18;
+        ctx.lineCap = "round";
+        ctx.filter = "blur(8px)";
+        ctx.stroke();
+        ctx.filter = "none";
+
+        // Accumulated ring (solid)
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, startAngle, progressAngle);
+        ctx.strokeStyle = `rgba(${cr},${cg},${cb},0.5)`;
+        ctx.lineWidth = lineW;
+        ctx.lineCap = "round";
+        ctx.stroke();
+      }
+
+      if (isRunning) {
+        // Spinning particle — 1 revolution per second, starts at 12 o'clock
+        const spinAngle = startAngle + (((now - spinStartRef.current) / 1000) % 1) * Math.PI * 2;
+
+        // Comet tail (gradient arc trailing the particle)
+        const tailLength = Math.PI * 0.6;
+        const tailStart = spinAngle - tailLength;
+        const segments = 30;
+        for (let i = 0; i < segments; i++) {
+          const t = i / segments;
+          const a0 = tailStart + (tailLength * i) / segments;
+          const a1 = tailStart + (tailLength * (i + 1)) / segments;
+          const alpha = t * t * 0.6; // quadratic fade-in
+          ctx.beginPath();
+          ctx.arc(cx, cy, r, a0, a1);
+          ctx.strokeStyle = `rgba(${cr},${cg},${cb},${alpha})`;
+          ctx.lineWidth = lineW * (0.5 + t * 0.5);
+          ctx.lineCap = "butt";
+          ctx.stroke();
+        }
+
+        // Bright particle head
+        const px = cx + r * Math.cos(spinAngle);
+        const py = cy + r * Math.sin(spinAngle);
+
+        // Outer glow
+        const grad = ctx.createRadialGradient(px, py, 0, px, py, 16);
+        grad.addColorStop(0, `rgba(${cr},${cg},${cb},0.6)`);
+        grad.addColorStop(0.5, `rgba(${cr},${cg},${cb},0.15)`);
+        grad.addColorStop(1, `rgba(${cr},${cg},${cb},0)`);
+        ctx.beginPath();
+        ctx.arc(px, py, 16, 0, Math.PI * 2);
+        ctx.fillStyle = grad;
+        ctx.fill();
+
+        // Core dot
+        const coreGrad = ctx.createRadialGradient(px, py, 0, px, py, 5);
+        coreGrad.addColorStop(0, "#fff");
+        coreGrad.addColorStop(0.4, `rgba(${cr},${cg},${cb},0.9)`);
+        coreGrad.addColorStop(1, `rgba(${cr},${cg},${cb},0)`);
+        ctx.beginPath();
+        ctx.arc(px, py, 5, 0, Math.PI * 2);
+        ctx.fillStyle = coreGrad;
+        ctx.fill();
+      }
+
+      animRef.current = requestAnimationFrame(draw);
+    };
+
+    animRef.current = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(animRef.current);
+  }, [elapsed, isRunning, color, maxSec, r, cx, cy, lineW]);
 
   return (
-    <svg
-      width="200"
-      height="200"
-      viewBox="0 0 200 200"
-      style={{
-        filter: isRunning ? `drop-shadow(0 0 20px ${color}33)` : "none",
-        transition: "filter 0.5s",
-      }}
-    >
-      <circle
-        cx="100" cy="100" r={r}
-        fill="none" stroke="rgba(255,255,255,0.04)" strokeWidth="6"
-      />
-      <circle
-        cx="100" cy="100" r={r}
-        fill="none" stroke={color} strokeWidth="6"
-        strokeDasharray={circ} strokeDashoffset={offset}
-        strokeLinecap="round" transform="rotate(-90 100 100)"
-        style={{ transition: "stroke-dashoffset 0.3s linear, stroke 0.5s" }}
-      />
-      {isRunning && (
-        <circle
-          cx="100" cy="100" r={r}
-          fill="none" stroke={color} strokeWidth="6" opacity="0.2"
-          strokeDasharray={circ} strokeDashoffset={offset}
-          strokeLinecap="round" transform="rotate(-90 100 100)"
-          style={{ filter: "blur(8px)" }}
-        />
-      )}
-    </svg>
+    <canvas
+      ref={canvasRef}
+      style={{ width: size, height: size }}
+    />
   );
 }

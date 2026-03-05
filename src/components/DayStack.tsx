@@ -28,7 +28,7 @@ export default function DayStack({ userId }: DayStackProps) {
   } = useCategories(userId);
   const {
     cards, loading: taskLoading,
-    addTask, updateTask, deleteTask, fetchWeek,
+    addTask, updateTask, deleteTask, fetchWeek, fetchDate,
   } = useTasks(userId);
 
   const [view, setView] = useState<ViewMode>("today");
@@ -56,6 +56,11 @@ export default function DayStack({ userId }: DayStackProps) {
   const [editCategory, setEditCategory] = useState("");
   const [editStart, setEditStart] = useState("");
   const [editEnd, setEditEnd] = useState("");
+
+  // Summary date navigation
+  const [summaryDate, setSummaryDate] = useState(todayStr());
+  const [summaryCards, setSummaryCards] = useState<TaskCard[]>([]);
+  const [summaryLoading, setSummaryLoading] = useState(false);
 
   // Weekly data
   const [weekTasks, setWeekTasks] = useState<TaskCard[]>([]);
@@ -107,6 +112,20 @@ export default function DayStack({ userId }: DayStackProps) {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
   }, [isRunning]);
+
+  // Fetch summary cards when summaryDate changes
+  useEffect(() => {
+    if (view !== "summary") return;
+    if (summaryDate === todayStr()) {
+      setSummaryCards(cards);
+      return;
+    }
+    setSummaryLoading(true);
+    fetchDate(summaryDate).then((data) => {
+      setSummaryCards(data);
+      setSummaryLoading(false);
+    });
+  }, [view, summaryDate, fetchDate, cards]);
 
   // Fetch week data when switching to summary or share
   useEffect(() => {
@@ -201,6 +220,20 @@ export default function DayStack({ userId }: DayStackProps) {
     setEditingId(null);
   };
 
+  const shiftDate = (dateStr: string, delta: number): string => {
+    const d = new Date(dateStr + "T00:00:00");
+    d.setDate(d.getDate() + delta);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  };
+
+  const formatDateLabel = (dateStr: string): string => {
+    const d = new Date(dateStr + "T00:00:00");
+    const dayNames = ["日", "月", "火", "水", "木", "金", "土"];
+    return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日（${dayNames[d.getDay()]}）`;
+  };
+
+  const isToday = summaryDate === todayStr();
+
   const loading = catLoading || taskLoading;
   const totalMin = cards.reduce((s, c) => s + c.minutes, 0);
   const now = new Date();
@@ -208,6 +241,10 @@ export default function DayStack({ userId }: DayStackProps) {
   const dateStr = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日（${dayNames[now.getDay()]}）`;
   const activeCat = getCat(timerCategory);
   const catSummary = buildCatSummary(categories, cards);
+
+  // Summary view calculations
+  const summaryTotalMin = summaryCards.reduce((s, c) => s + c.minutes, 0);
+  const summaryCatSummary = buildCatSummary(categories, summaryCards);
 
   if (loading && categories.length === 0) {
     return (
@@ -750,135 +787,202 @@ export default function DayStack({ userId }: DayStackProps) {
         {/* ─── SUMMARY VIEW ─── */}
         {view === "summary" && (
           <div>
-            {/* Time breakdown */}
+            {/* Date navigation */}
             <div
               style={{
-                background: "rgba(255,255,255,0.03)", borderRadius: 20, padding: 24,
-                border: "1px solid rgba(255,255,255,0.06)", marginBottom: 20,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                gap: 16, marginBottom: 20,
               }}
             >
-              <div style={{ fontSize: 13, color: "#888", marginBottom: 12, fontWeight: 600 }}>⏱ 時間配分</div>
-              <div style={{ display: "flex", height: 44, borderRadius: 12, overflow: "hidden", gap: 3, marginBottom: 16 }}>
-                {catSummary.map((c) => (
-                  <div
-                    key={c.id}
-                    style={{
-                      flex: c.pct,
-                      background: `linear-gradient(180deg, ${c.color} 0%, ${c.color}aa 100%)`,
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      fontSize: 13, fontWeight: 700, color: "#000", borderRadius: 4,
-                      minWidth: c.pct > 10 ? "auto" : 0, transition: "flex 0.5s ease",
-                    }}
-                  >
-                    {c.pct > 14 ? `${c.pct}%` : ""}
-                  </div>
-                ))}
+              <button
+                onClick={() => setSummaryDate(shiftDate(summaryDate, -1))}
+                style={{
+                  width: 36, height: 36, borderRadius: 10,
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  background: "rgba(255,255,255,0.03)", color: "#888",
+                  fontSize: 16, cursor: "pointer",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                }}
+              >
+                ‹
+              </button>
+              <div style={{ textAlign: "center", minWidth: 180 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: "#ccc" }}>
+                  {formatDateLabel(summaryDate)}
+                </div>
+                <div style={{ fontSize: 11, color: "#555", marginTop: 2 }}>
+                  {summaryCards.length}タスク・{fmtMin(summaryTotalMin)}
+                </div>
               </div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: "10px 20px" }}>
-                {catSummary.map((c) => (
-                  <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <div style={{ width: 10, height: 10, borderRadius: 3, background: c.color }} />
-                    <span style={{ fontSize: 13, color: "#ccc" }}>{c.label}</span>
-                    <span style={{ fontSize: 12, color: "#666" }}>
-                      {c.minutes}m ({c.pct}%)
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Timeline */}
-            <div
-              style={{
-                background: "rgba(255,255,255,0.03)", borderRadius: 20, padding: 24,
-                border: "1px solid rgba(255,255,255,0.06)", marginBottom: 20,
-              }}
-            >
-              <div style={{ fontSize: 13, color: "#888", marginBottom: 16, fontWeight: 600 }}>📅 タイムライン</div>
-              <div style={{ position: "relative", paddingLeft: 20 }}>
-                <div
+              <button
+                onClick={() => setSummaryDate(shiftDate(summaryDate, 1))}
+                disabled={isToday}
+                style={{
+                  width: 36, height: 36, borderRadius: 10,
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  background: "rgba(255,255,255,0.03)",
+                  color: isToday ? "#333" : "#888",
+                  fontSize: 16, cursor: isToday ? "default" : "pointer",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                }}
+              >
+                ›
+              </button>
+              {!isToday && (
+                <button
+                  onClick={() => setSummaryDate(todayStr())}
                   style={{
-                    position: "absolute", left: 5, top: 4, bottom: 4,
-                    width: 2, background: "rgba(255,255,255,0.06)", borderRadius: 1,
-                  }}
-                />
-                {cards.map((card, i) => {
-                  const cat = getCat(card.category);
-                  return (
-                    <div key={card.id} style={{ position: "relative", marginBottom: i < cards.length - 1 ? 16 : 0 }}>
-                      <div
-                        style={{
-                          position: "absolute", left: -18, top: 6,
-                          width: 10, height: 10, borderRadius: "50%",
-                          background: cat.color, border: "2px solid #0d0d14",
-                        }}
-                      />
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                        <span style={{ fontSize: 13, fontWeight: 600 }}>{card.title}</span>
-                        <span style={{ fontSize: 11, color: "#555", flexShrink: 0, marginLeft: 8 }}>
-                          {fmtMin(card.minutes)}
-                        </span>
-                      </div>
-                      <div style={{ fontSize: 11, color: "#555", marginTop: 2 }}>
-                        {card.startTime} → {card.endTime}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Metrics */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
-              {[
-                {
-                  label: "合計タスク",
-                  value: `${cards.length}件`,
-                  sub: cards.length >= 6 ? "よく頑張った！" : "いいペース",
-                },
-                {
-                  label: "総作業時間",
-                  value: fmtMin(totalMin),
-                  sub: totalMin > 360 ? "ハードな1日" : "バランス◎",
-                },
-                {
-                  label: "集中作業率",
-                  value: `${catSummary.find((c) => c.id === "deepwork")?.pct || 0}%`,
-                  sub:
-                    (catSummary.find((c) => c.id === "deepwork")?.pct || 0) >= 30
-                      ? "🔥 高い！"
-                      : "もう少し確保",
-                },
-                {
-                  label: "会議率",
-                  value: `${catSummary.find((c) => c.id === "meeting")?.pct || 0}%`,
-                  sub:
-                    (catSummary.find((c) => c.id === "meeting")?.pct || 0) > 40 ? "⚠️ 多め" : "✅ 適正",
-                },
-              ].map((m, i) => (
-                <div
-                  key={i}
-                  style={{
-                    padding: "16px 14px", borderRadius: 14,
-                    background: "rgba(255,255,255,0.03)",
-                    border: "1px solid rgba(255,255,255,0.06)",
+                    padding: "6px 12px", borderRadius: 8, border: "none",
+                    background: "rgba(78,205,196,0.15)", color: "#4ECDC4",
+                    fontSize: 11, fontWeight: 600, cursor: "pointer",
                   }}
                 >
-                  <div
-                    style={{
-                      fontSize: 10, color: "#888", marginBottom: 4,
-                      letterSpacing: 0.5, textTransform: "uppercase",
-                    }}
-                  >
-                    {m.label}
-                  </div>
-                  <div style={{ fontSize: 24, fontWeight: 800, letterSpacing: -1, marginBottom: 2 }}>
-                    {m.value}
-                  </div>
-                  <div style={{ fontSize: 11, color: "#555" }}>{m.sub}</div>
-                </div>
-              ))}
+                  今日
+                </button>
+              )}
             </div>
+
+            {summaryLoading ? (
+              <div style={{ textAlign: "center", padding: "40px 0", color: "#555", fontSize: 13 }}>
+                読み込み中...
+              </div>
+            ) : summaryCards.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "40px 0", color: "#444", fontSize: 13 }}>
+                この日の記録はありません
+              </div>
+            ) : (
+              <>
+                {/* Time breakdown */}
+                <div
+                  style={{
+                    background: "rgba(255,255,255,0.03)", borderRadius: 20, padding: 24,
+                    border: "1px solid rgba(255,255,255,0.06)", marginBottom: 20,
+                  }}
+                >
+                  <div style={{ fontSize: 13, color: "#888", marginBottom: 12, fontWeight: 600 }}>⏱ 時間配分</div>
+                  <div style={{ display: "flex", height: 44, borderRadius: 12, overflow: "hidden", gap: 3, marginBottom: 16 }}>
+                    {summaryCatSummary.map((c) => (
+                      <div
+                        key={c.id}
+                        style={{
+                          flex: c.pct,
+                          background: `linear-gradient(180deg, ${c.color} 0%, ${c.color}aa 100%)`,
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          fontSize: 13, fontWeight: 700, color: "#000", borderRadius: 4,
+                          minWidth: c.pct > 10 ? "auto" : 0, transition: "flex 0.5s ease",
+                        }}
+                      >
+                        {c.pct > 14 ? `${c.pct}%` : ""}
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "10px 20px" }}>
+                    {summaryCatSummary.map((c) => (
+                      <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <div style={{ width: 10, height: 10, borderRadius: 3, background: c.color }} />
+                        <span style={{ fontSize: 13, color: "#ccc" }}>{c.label}</span>
+                        <span style={{ fontSize: 12, color: "#666" }}>
+                          {c.minutes}m ({c.pct}%)
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Timeline */}
+                <div
+                  style={{
+                    background: "rgba(255,255,255,0.03)", borderRadius: 20, padding: 24,
+                    border: "1px solid rgba(255,255,255,0.06)", marginBottom: 20,
+                  }}
+                >
+                  <div style={{ fontSize: 13, color: "#888", marginBottom: 16, fontWeight: 600 }}>📅 タイムライン</div>
+                  <div style={{ position: "relative", paddingLeft: 20 }}>
+                    <div
+                      style={{
+                        position: "absolute", left: 5, top: 4, bottom: 4,
+                        width: 2, background: "rgba(255,255,255,0.06)", borderRadius: 1,
+                      }}
+                    />
+                    {summaryCards.map((card, i) => {
+                      const cat = getCat(card.category);
+                      return (
+                        <div key={card.id} style={{ position: "relative", marginBottom: i < summaryCards.length - 1 ? 16 : 0 }}>
+                          <div
+                            style={{
+                              position: "absolute", left: -18, top: 6,
+                              width: 10, height: 10, borderRadius: "50%",
+                              background: cat.color, border: "2px solid #0d0d14",
+                            }}
+                          />
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                            <span style={{ fontSize: 13, fontWeight: 600 }}>{card.title}</span>
+                            <span style={{ fontSize: 11, color: "#555", flexShrink: 0, marginLeft: 8 }}>
+                              {fmtMin(card.minutes)}
+                            </span>
+                          </div>
+                          <div style={{ fontSize: 11, color: "#555", marginTop: 2 }}>
+                            {card.startTime} → {card.endTime}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Metrics */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
+                  {[
+                    {
+                      label: "合計タスク",
+                      value: `${summaryCards.length}件`,
+                      sub: summaryCards.length >= 6 ? "よく頑張った！" : "いいペース",
+                    },
+                    {
+                      label: "総作業時間",
+                      value: fmtMin(summaryTotalMin),
+                      sub: summaryTotalMin > 360 ? "ハードな1日" : "バランス◎",
+                    },
+                    {
+                      label: "集中作業率",
+                      value: `${summaryCatSummary.find((c) => c.id === "deepwork")?.pct || 0}%`,
+                      sub:
+                        (summaryCatSummary.find((c) => c.id === "deepwork")?.pct || 0) >= 30
+                          ? "🔥 高い！"
+                          : "もう少し確保",
+                    },
+                    {
+                      label: "会議率",
+                      value: `${summaryCatSummary.find((c) => c.id === "meeting")?.pct || 0}%`,
+                      sub:
+                        (summaryCatSummary.find((c) => c.id === "meeting")?.pct || 0) > 40 ? "⚠️ 多め" : "✅ 適正",
+                    },
+                  ].map((m, i) => (
+                    <div
+                      key={i}
+                      style={{
+                        padding: "16px 14px", borderRadius: 14,
+                        background: "rgba(255,255,255,0.03)",
+                        border: "1px solid rgba(255,255,255,0.06)",
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontSize: 10, color: "#888", marginBottom: 4,
+                          letterSpacing: 0.5, textTransform: "uppercase",
+                        }}
+                      >
+                        {m.label}
+                      </div>
+                      <div style={{ fontSize: 24, fontWeight: 800, letterSpacing: -1, marginBottom: 2 }}>
+                        {m.value}
+                      </div>
+                      <div style={{ fontSize: 11, color: "#555" }}>{m.sub}</div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
 
             {/* Weekly DNA */}
             <div style={{ marginBottom: 20 }}>

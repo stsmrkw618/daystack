@@ -212,5 +212,21 @@ export function useTasks(userId: string, selectedDate?: string) {
     return (data || []).map(dbToCard);
   }, [userId]);
 
-  return { cards, loading, addTask, updateTask, deleteTask, fetchWeek };
+  const fetchDate = useCallback(async (targetDate: string): Promise<TaskCard[]> => {
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from("daystack_tasks")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("date", targetDate)
+      .order("start_time", { ascending: true });
+
+    if (error) {
+      console.error("Failed to fetch tasks for date:", error);
+      return [];
+    }
+    return (data || []).map(dbToCard);
+  }, [userId]);
+
+  return { cards, loading, addTask, updateTask, deleteTask, fetchWeek, fetchDate };
 }
