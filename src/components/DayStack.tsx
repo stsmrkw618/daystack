@@ -16,6 +16,14 @@ import WeeklyDNA from "@/components/WeeklyDNA";
 
 type ViewMode = "today" | "summary" | "share";
 
+interface ActiveTimer {
+  id: number;
+  category: string;
+  title: string;
+  startTime: Date;
+  elapsed: number;
+}
+
 interface DayStackProps {
   userId: string;
 }
@@ -34,13 +42,13 @@ export default function DayStack({ userId }: DayStackProps) {
   const [view, setView] = useState<ViewMode>("today");
   const [showCatEditor, setShowCatEditor] = useState(false);
 
-  // Timer
-  const [isRunning, setIsRunning] = useState(false);
-  const [elapsed, setElapsed] = useState(0);
-  const [timerCategory, setTimerCategory] = useState("deepwork");
-  const [timerTitle, setTimerTitle] = useState("");
-  const [timerStartTime, setTimerStartTime] = useState<Date | null>(null);
+  // Timer — supports parallel timers
+  const [activeTimers, setActiveTimers] = useState<ActiveTimer[]>([]);
+  const [focusedTimerId, setFocusedTimerId] = useState<number | null>(null);
+  const [newTimerCategory, setNewTimerCategory] = useState("deepwork");
+  const [newTimerTitle, setNewTimerTitle] = useState("");
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const [showParallelForm, setShowParallelForm] = useState(false);
 
   // Manual entry
   const [showManual, setShowManual] = useState(false);
@@ -93,6 +101,11 @@ export default function DayStack({ userId }: DayStackProps) {
     setTimeout(() => setShareStatus(null), 3000);
   }, []);
 
+  // Derived timer state
+  const isRunning = activeTimers.length > 0;
+  const focusedTimer = activeTimers.find(t => t.id === focusedTimerId) || activeTimers[0] || null;
+  const elapsed = focusedTimer?.elapsed ?? 0;
+
   // Pulse animation
   const [pulse, setPulse] = useState(false);
   useEffect(() => {
@@ -101,17 +114,20 @@ export default function DayStack({ userId }: DayStackProps) {
     return () => clearInterval(p);
   }, [isRunning]);
 
-  // Timer tick
+  // Timer tick — updates all active timers
+  const hasActiveTimers = isRunning;
   useEffect(() => {
-    if (isRunning) {
-      intervalRef.current = setInterval(() => setElapsed((e) => e + 1), 1000);
+    if (hasActiveTimers) {
+      intervalRef.current = setInterval(() => {
+        setActiveTimers(prev => prev.map(t => ({ ...t, elapsed: t.elapsed + 1 })));
+      }, 1000);
     } else {
       if (intervalRef.current) clearInterval(intervalRef.current);
     }
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [isRunning]);
+  }, [hasActiveTimers]);
 
   // Fetch summary cards when summaryDate changes
   useEffect(() => {
@@ -137,34 +153,44 @@ export default function DayStack({ userId }: DayStackProps) {
   const getCat = (id: string) => getCatFromList(categories, id);
 
   const startTimer = () => {
-    setElapsed(0);
-    setTimerStartTime(new Date());
-    setIsRunning(true);
+    const id = Date.now();
+    const newTimer: ActiveTimer = {
+      id,
+      category: newTimerCategory,
+      title: newTimerTitle,
+      startTime: new Date(),
+      elapsed: 0,
+    };
+    setActiveTimers(prev => [...prev, newTimer]);
+    setFocusedTimerId(id);
+    setNewTimerTitle("");
   };
 
-  const stopTimer = () => {
-    setIsRunning(false);
+  const stopTimer = (timerId?: number) => {
+    const targetId = timerId ?? focusedTimer?.id;
+    const timer = activeTimers.find(t => t.id === targetId);
+    if (!timer) return;
+
     const now = new Date();
-    // elapsed state はクロージャの問題で古い値になりうるため、壁時計から算出
-    const realSec = timerStartTime
-      ? Math.round((now.getTime() - timerStartTime.getTime()) / 1000)
-      : elapsed;
+    // 壁時計ベースで正確な経過秒を算出
+    const realSec = Math.round((now.getTime() - timer.startTime.getTime()) / 1000);
     const minutes = Math.max(1, Math.round(realSec / 60));
-    const startStr = timerStartTime ? timerStartTime.toTimeString().slice(0, 5) : "--:--";
+    const startStr = timer.startTime.toTimeString().slice(0, 5);
     const endStr = now.toTimeString().slice(0, 5);
-    const cat = getCat(timerCategory);
-    const newTask = {
-      id: Date.now(),
-      title: timerTitle.trim() || cat.label,
-      category: timerCategory,
+    const cat = getCat(timer.category);
+    addTask({
+      id: timer.id,
+      title: timer.title.trim() || cat.label,
+      category: timer.category,
       minutes,
       startTime: startStr,
       endTime: endStr,
-    };
-    addTask(newTask);
-    setTimerTitle("");
-    setElapsed(0);
-    setTimerStartTime(null);
+    });
+
+    setActiveTimers(prev => prev.filter(t => t.id !== targetId));
+    if (focusedTimerId === targetId) {
+      setFocusedTimerId(null);
+    }
   };
 
   const submitManual = () => {
@@ -239,7 +265,7 @@ export default function DayStack({ userId }: DayStackProps) {
   const now = new Date();
   const dayNames = ["日", "月", "火", "水", "木", "金", "土"];
   const dateStr = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日（${dayNames[now.getDay()]}）`;
-  const activeCat = getCat(timerCategory);
+  const activeCat = focusedTimer ? getCat(focusedTimer.category) : getCat(newTimerCategory);
   const catSummary = buildCatSummary(categories, cards);
 
   // Summary view calculations
@@ -289,8 +315,8 @@ export default function DayStack({ userId }: DayStackProps) {
           style={{
             position: "absolute", top: "5%", left: "50%", transform: "translateX(-50%)",
             width: 300, height: 300, borderRadius: "50%",
-            background: isRunning ? activeCat.color : "#4ECDC4",
-            opacity: isRunning ? 0.06 : 0.02,
+            background: activeTimers.length > 0 ? getCat(activeTimers[0].category).color : "#4ECDC4",
+            opacity: activeTimers.length > 0 ? 0.06 : 0.02,
             filter: "blur(80px)", transition: "all 1s ease",
           }}
         />
@@ -397,87 +423,238 @@ export default function DayStack({ userId }: DayStackProps) {
                 borderBottom: "1px solid rgba(255,255,255,0.04)",
               }}
             >
-              {/* Ring */}
-              <div style={{ position: "relative", width: 200, height: 200, marginBottom: 20 }}>
-                <TimerRing elapsed={elapsed} isRunning={isRunning} color={activeCat.color} />
-                <div
-                  style={{
-                    position: "absolute", top: "50%", left: "50%",
-                    transform: "translate(-50%, -50%)", textAlign: "center",
-                  }}
-                >
-                  <div
+              {/* Timer rings — single or parallel */}
+              {activeTimers.length === 0 ? (
+                <>
+                  {/* Idle ring */}
+                  <div style={{ position: "relative", width: 200, height: 200, marginBottom: 20 }}>
+                    <TimerRing elapsed={0} isRunning={false} color={activeCat.color} />
+                    <div
+                      style={{
+                        position: "absolute", top: "50%", left: "50%",
+                        transform: "translate(-50%, -50%)", textAlign: "center",
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontSize: 36, fontWeight: 800, letterSpacing: -1,
+                          fontVariantNumeric: "tabular-nums", color: "#555",
+                        }}
+                      >
+                        {fmtTime(0)}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Category pills */}
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, justifyContent: "center", marginBottom: 16 }}>
+                    {categories.map((cat) => (
+                      <button
+                        key={cat.id}
+                        onClick={() => setNewTimerCategory(cat.id)}
+                        style={{
+                          padding: "7px 14px", borderRadius: 20, border: "none",
+                          cursor: "pointer",
+                          fontSize: 12, fontWeight: 600, transition: "all 0.25s",
+                          background: newTimerCategory === cat.id ? cat.color + "25" : "rgba(255,255,255,0.04)",
+                          color: newTimerCategory === cat.id ? cat.color : "#666",
+                          boxShadow: newTimerCategory === cat.id ? `0 0 12px ${cat.color}15` : "none",
+                        }}
+                      >
+                        {cat.icon} {cat.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Title input */}
+                  <input
+                    value={newTimerTitle}
+                    onChange={(e) => setNewTimerTitle(e.target.value)}
+                    placeholder="タスク名（省略可）"
                     style={{
-                      fontSize: 36, fontWeight: 800, letterSpacing: -1,
-                      fontVariantNumeric: "tabular-nums",
-                      color: isRunning ? "#fff" : "#555",
-                      transition: "color 0.3s",
+                      width: "80%", maxWidth: 320, padding: "10px 16px", borderRadius: 12,
+                      border: "1px solid rgba(255,255,255,0.08)",
+                      background: "rgba(0,0,0,0.3)", color: "#fff", fontSize: 14,
+                      textAlign: "center", outline: "none", boxSizing: "border-box",
+                    }}
+                  />
+
+                  {/* START */}
+                  <button
+                    onClick={startTimer}
+                    style={{
+                      marginTop: 20, width: 180, padding: "14px 0", borderRadius: 16,
+                      border: "none", cursor: "pointer", fontSize: 16, fontWeight: 800,
+                      letterSpacing: 1, transition: "all 0.3s",
+                      background: "linear-gradient(135deg, #4ECDC4, #44B09E)",
+                      color: "#000",
+                      boxShadow: "0 8px 32px rgba(78,205,196,0.25)",
                     }}
                   >
-                    {fmtTime(elapsed)}
+                    ▶  START
+                  </button>
+                </>
+              ) : (
+                <>
+                  {/* Active timer rings — displayed side by side */}
+                  <div style={{
+                    display: "flex", gap: activeTimers.length >= 2 ? 12 : 0,
+                    justifyContent: "center", alignItems: "flex-start",
+                    marginBottom: 20, flexWrap: "wrap",
+                  }}>
+                    {activeTimers.map((timer) => {
+                      const tCat = getCat(timer.category);
+                      const ringSize = activeTimers.length === 1 ? 200 : 150;
+                      const fontSize = activeTimers.length === 1 ? 36 : 24;
+                      const labelSize = activeTimers.length === 1 ? 11 : 10;
+                      return (
+                        <div key={timer.id} style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+                          {/* Ring + overlay */}
+                          <div style={{ position: "relative", width: ringSize, height: ringSize, marginBottom: 10 }}>
+                            <TimerRing elapsed={timer.elapsed} isRunning={true} color={tCat.color} size={ringSize} />
+                            <div
+                              style={{
+                                position: "absolute", top: "50%", left: "50%",
+                                transform: "translate(-50%, -50%)", textAlign: "center",
+                              }}
+                            >
+                              <div
+                                style={{
+                                  fontSize, fontWeight: 800, letterSpacing: -1,
+                                  fontVariantNumeric: "tabular-nums", color: "#fff",
+                                }}
+                              >
+                                {fmtTime(timer.elapsed)}
+                              </div>
+                              <div style={{ fontSize: labelSize, color: tCat.color, marginTop: 2, fontWeight: 600 }}>
+                                {tCat.icon} {tCat.label}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Title input per timer */}
+                          <input
+                            value={timer.title}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setActiveTimers(prev => prev.map(t =>
+                                t.id === timer.id ? { ...t, title: val } : t
+                              ));
+                            }}
+                            placeholder="何をやってる？"
+                            style={{
+                              width: activeTimers.length === 1 ? "80%" : "100%",
+                              maxWidth: activeTimers.length === 1 ? 320 : 150,
+                              padding: activeTimers.length === 1 ? "10px 16px" : "7px 10px",
+                              borderRadius: 10,
+                              border: `1px solid ${tCat.color}30`,
+                              background: "rgba(0,0,0,0.3)", color: "#fff",
+                              fontSize: activeTimers.length === 1 ? 14 : 12,
+                              textAlign: "center", outline: "none", boxSizing: "border-box",
+                            }}
+                          />
+
+                          {/* STOP button per timer */}
+                          <button
+                            onClick={() => stopTimer(timer.id)}
+                            style={{
+                              marginTop: 10,
+                              width: activeTimers.length === 1 ? 180 : 120,
+                              padding: activeTimers.length === 1 ? "14px 0" : "10px 0",
+                              borderRadius: activeTimers.length === 1 ? 16 : 12,
+                              border: "none", cursor: "pointer",
+                              fontSize: activeTimers.length === 1 ? 16 : 13,
+                              fontWeight: 800, letterSpacing: 1, transition: "all 0.3s",
+                              background: "linear-gradient(135deg, #FF6B6B, #ee5a24)",
+                              color: "#000",
+                              boxShadow: `0 8px 32px rgba(255,107,107,${pulse ? 0.4 : 0.2})`,
+                              transform: pulse ? "scale(1.02)" : "scale(1)",
+                            }}
+                          >
+                            ■  STOP
+                          </button>
+                        </div>
+                      );
+                    })}
                   </div>
-                  {isRunning && (
-                    <div style={{ fontSize: 11, color: activeCat.color, marginTop: 2, fontWeight: 600 }}>
-                      {activeCat.icon} {activeCat.label}
+
+                  {/* Add parallel timer */}
+                  {!showParallelForm && (
+                    <button
+                      onClick={() => setShowParallelForm(true)}
+                      style={{
+                        padding: "8px 16px", borderRadius: 10, border: "none",
+                        background: "rgba(255,255,255,0.04)", color: "#666",
+                        fontSize: 12, fontWeight: 600, cursor: "pointer",
+                        transition: "all 0.2s",
+                      }}
+                    >
+                      ＋ 並行タスクを追加
+                    </button>
+                  )}
+                  {showParallelForm && (
+                    <div
+                      style={{
+                        marginTop: 8, padding: 16, borderRadius: 14, width: "90%", maxWidth: 360,
+                        background: "rgba(255,255,255,0.03)",
+                        border: "1px solid rgba(255,255,255,0.08)",
+                        boxSizing: "border-box",
+                      }}
+                    >
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 10 }}>
+                        {categories.map((cat) => (
+                          <button
+                            key={cat.id}
+                            onClick={() => setNewTimerCategory(cat.id)}
+                            style={{
+                              padding: "5px 10px", borderRadius: 14, border: "none",
+                              cursor: "pointer", fontSize: 11, fontWeight: 600,
+                              transition: "all 0.2s",
+                              background: newTimerCategory === cat.id ? cat.color + "25" : "rgba(255,255,255,0.04)",
+                              color: newTimerCategory === cat.id ? cat.color : "#666",
+                            }}
+                          >
+                            {cat.icon} {cat.label}
+                          </button>
+                        ))}
+                      </div>
+                      <input
+                        value={newTimerTitle}
+                        onChange={(e) => setNewTimerTitle(e.target.value)}
+                        placeholder="タスク名（省略可）"
+                        style={{
+                          width: "100%", padding: "9px 12px", borderRadius: 10,
+                          border: "1px solid rgba(255,255,255,0.08)",
+                          background: "rgba(0,0,0,0.3)", color: "#fff",
+                          fontSize: 13, outline: "none", marginBottom: 10, boxSizing: "border-box",
+                        }}
+                      />
+                      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                        <button
+                          onClick={() => { setShowParallelForm(false); setNewTimerTitle(""); }}
+                          style={{
+                            padding: "8px 14px", borderRadius: 10, border: "none",
+                            background: "rgba(255,255,255,0.06)", color: "#888",
+                            fontSize: 12, fontWeight: 600, cursor: "pointer",
+                          }}
+                        >
+                          キャンセル
+                        </button>
+                        <button
+                          onClick={() => { startTimer(); setShowParallelForm(false); }}
+                          style={{
+                            padding: "8px 20px", borderRadius: 10, border: "none",
+                            background: "linear-gradient(135deg, #4ECDC4, #44B09E)",
+                            color: "#000", fontSize: 12, fontWeight: 700, cursor: "pointer",
+                          }}
+                        >
+                          ▶ START
+                        </button>
+                      </div>
                     </div>
                   )}
-                </div>
-              </div>
-
-              {/* Category pills */}
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, justifyContent: "center", marginBottom: 16 }}>
-                {categories.map((cat) => (
-                  <button
-                    key={cat.id}
-                    onClick={() => !isRunning && setTimerCategory(cat.id)}
-                    style={{
-                      padding: "7px 14px", borderRadius: 20, border: "none",
-                      cursor: isRunning ? "default" : "pointer",
-                      fontSize: 12, fontWeight: 600, transition: "all 0.25s",
-                      background: timerCategory === cat.id ? cat.color + "25" : "rgba(255,255,255,0.04)",
-                      color: timerCategory === cat.id ? cat.color : "#666",
-                      boxShadow: timerCategory === cat.id ? `0 0 12px ${cat.color}15` : "none",
-                      opacity: isRunning && timerCategory !== cat.id ? 0.3 : 1,
-                    }}
-                  >
-                    {cat.icon} {cat.label}
-                  </button>
-                ))}
-              </div>
-
-              {/* Title input */}
-              <input
-                value={timerTitle}
-                onChange={(e) => setTimerTitle(e.target.value)}
-                placeholder={isRunning ? "何をやってる？（後からでもOK）" : "タスク名（省略可）"}
-                style={{
-                  width: "80%", maxWidth: 320, padding: "10px 16px", borderRadius: 12,
-                  border: `1px solid ${isRunning ? activeCat.color + "30" : "rgba(255,255,255,0.08)"}`,
-                  background: "rgba(0,0,0,0.3)", color: "#fff", fontSize: 14,
-                  textAlign: "center", outline: "none",
-                  transition: "border-color 0.3s", boxSizing: "border-box",
-                }}
-              />
-
-              {/* Start/Stop */}
-              <button
-                onClick={isRunning ? stopTimer : startTimer}
-                style={{
-                  marginTop: 20, width: 180, padding: "14px 0", borderRadius: 16,
-                  border: "none", cursor: "pointer", fontSize: 16, fontWeight: 800,
-                  letterSpacing: 1, transition: "all 0.3s",
-                  background: isRunning
-                    ? "linear-gradient(135deg, #FF6B6B, #ee5a24)"
-                    : "linear-gradient(135deg, #4ECDC4, #44B09E)",
-                  color: "#000",
-                  boxShadow: isRunning
-                    ? `0 8px 32px rgba(255,107,107,${pulse ? 0.4 : 0.2})`
-                    : "0 8px 32px rgba(78,205,196,0.25)",
-                  transform: pulse && isRunning ? "scale(1.02)" : "scale(1)",
-                }}
-              >
-                {isRunning ? "■  STOP" : "▶  START"}
-              </button>
+                </>
+              )}
             </div>
 
             {/* Mini progress bar */}

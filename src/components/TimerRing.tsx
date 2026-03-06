@@ -6,6 +6,7 @@ interface TimerRingProps {
   elapsed: number;
   isRunning: boolean;
   color: string;
+  size?: number;
 }
 
 function hexToRgb(hex: string): [number, number, number] {
@@ -17,7 +18,7 @@ function hexToRgb(hex: string): [number, number, number] {
   ];
 }
 
-export default function TimerRing({ elapsed, isRunning, color }: TimerRingProps) {
+export default function TimerRing({ elapsed, isRunning, color, size: sizeProp = 200 }: TimerRingProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animRef = useRef<number>(0);
   const spinStartRef = useRef<number>(0);
@@ -30,11 +31,11 @@ export default function TimerRing({ elapsed, isRunning, color }: TimerRingProps)
   }, [isRunning]);
 
   const maxSec = 3600;
-  const size = 200;
+  const size = sizeProp;
   const cx = size / 2;
   const cy = size / 2;
-  const r = 88;
-  const lineW = 6;
+  const r = size * 0.44;
+  const lineW = Math.max(3, size * 0.03);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -75,9 +76,9 @@ export default function TimerRing({ elapsed, isRunning, color }: TimerRingProps)
         ctx.beginPath();
         ctx.arc(cx, cy, r, startAngle, progressAngle);
         ctx.strokeStyle = `rgba(${cr},${cg},${cb},0.15)`;
-        ctx.lineWidth = 18;
+        ctx.lineWidth = size * 0.09;
         ctx.lineCap = "round";
-        ctx.filter = "blur(8px)";
+        ctx.filter = `blur(${Math.round(size * 0.04)}px)`;
         ctx.stroke();
         ctx.filter = "none";
 
@@ -116,22 +117,24 @@ export default function TimerRing({ elapsed, isRunning, color }: TimerRingProps)
         const py = cy + r * Math.sin(spinAngle);
 
         // Outer glow
-        const grad = ctx.createRadialGradient(px, py, 0, px, py, 16);
+        const glowR = size * 0.08;
+        const grad = ctx.createRadialGradient(px, py, 0, px, py, glowR);
         grad.addColorStop(0, `rgba(${cr},${cg},${cb},0.6)`);
         grad.addColorStop(0.5, `rgba(${cr},${cg},${cb},0.15)`);
         grad.addColorStop(1, `rgba(${cr},${cg},${cb},0)`);
         ctx.beginPath();
-        ctx.arc(px, py, 16, 0, Math.PI * 2);
+        ctx.arc(px, py, glowR, 0, Math.PI * 2);
         ctx.fillStyle = grad;
         ctx.fill();
 
         // Core dot
-        const coreGrad = ctx.createRadialGradient(px, py, 0, px, py, 5);
+        const coreR = size * 0.025;
+        const coreGrad = ctx.createRadialGradient(px, py, 0, px, py, coreR);
         coreGrad.addColorStop(0, "#fff");
         coreGrad.addColorStop(0.4, `rgba(${cr},${cg},${cb},0.9)`);
         coreGrad.addColorStop(1, `rgba(${cr},${cg},${cb},0)`);
         ctx.beginPath();
-        ctx.arc(px, py, 5, 0, Math.PI * 2);
+        ctx.arc(px, py, coreR, 0, Math.PI * 2);
         ctx.fillStyle = coreGrad;
         ctx.fill();
       }
@@ -141,7 +144,7 @@ export default function TimerRing({ elapsed, isRunning, color }: TimerRingProps)
 
     animRef.current = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(animRef.current);
-  }, [elapsed, isRunning, color, maxSec, r, cx, cy, lineW]);
+  }, [elapsed, isRunning, color, maxSec, r, cx, cy, lineW, size]);
 
   return (
     <canvas
