@@ -101,7 +101,8 @@ export function useTasks(userId: string, selectedDate?: string) {
   }, [userId, date, fetchTasks]);
 
   const addTask = useCallback(
-    async (task: Omit<TaskCard, "date">) => {
+    async (task: Omit<TaskCard, "date"> & { date?: string }) => {
+      const taskDate = task.date ?? date;
       const supabase = createClient();
       const row = {
         id: task.id,
@@ -111,11 +112,12 @@ export function useTasks(userId: string, selectedDate?: string) {
         minutes: task.minutes,
         start_time: task.startTime,
         end_time: task.endTime,
-        date,
+        date: taskDate,
       };
-      // Optimistic update (sorted by startTime)
+      // Optimistic update (sorted by startTime) — only if task belongs to current view date
       setCards((prev) => {
-        const next = [...prev, { ...task, date }];
+        if (taskDate !== date) return prev;
+        const next = [...prev, { ...task, date: taskDate }];
         next.sort((a, b) => a.startTime.localeCompare(b.startTime));
         return next;
       });

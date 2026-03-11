@@ -177,6 +177,8 @@ export default function DayStack({ userId }: DayStackProps) {
     const minutes = Math.max(1, Math.round(realSec / 60));
     const startStr = timer.startTime.toTimeString().slice(0, 5);
     const endStr = now.toTimeString().slice(0, 5);
+    // タイマー開始日の日付を使用（日跨ぎ対策）
+    const startDate = `${timer.startTime.getFullYear()}-${String(timer.startTime.getMonth() + 1).padStart(2, "0")}-${String(timer.startTime.getDate()).padStart(2, "0")}`;
     const cat = getCat(timer.category);
     addTask({
       id: timer.id,
@@ -185,6 +187,7 @@ export default function DayStack({ userId }: DayStackProps) {
       minutes,
       startTime: startStr,
       endTime: endStr,
+      date: startDate,
     });
 
     setActiveTimers(prev => prev.filter(t => t.id !== targetId));
