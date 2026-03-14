@@ -21,6 +21,18 @@ export interface CatSummary extends Category {
   pct: number;
 }
 
+export interface WeeklySummary {
+  weekStart: string; // "YYYY-MM-DD" (Monday)
+  totalTasks: number;
+  totalMinutes: number;
+  dailyAvgMinutes: number;
+  categoryBreakdown: { label: string; icon: string; color: string; minutes: number; pct: number }[];
+  dailyBreakdown: { date: string; dayLabel: string; tasks: number; minutes: number }[];
+  projectBreakdown: { name: string; minutes: number }[];
+  insights: string[];
+  suggestions: string[];
+}
+
 // ─── Default Categories ───
 export const DEFAULT_CATEGORIES: Category[] = [
   { id: "meeting", label: "会議", color: "#FF6B6B", icon: "🗣" },

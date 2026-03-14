@@ -2,12 +2,13 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import {
-  Category, TaskCard,
+  Category, TaskCard, WeeklySummary,
   fmtTime, fmtMin, getCatFromList, buildCatSummary, todayStr,
 } from "@/lib/constants";
 import { useAuth } from "@/lib/hooks/useAuth";
 import { useCategories } from "@/lib/hooks/useCategories";
 import { useTasks } from "@/lib/hooks/useTasks";
+import { useWeeklySummary } from "@/lib/hooks/useWeeklySummary";
 import { shareToTwitter, copyShareImage } from "@/lib/shareUtils";
 import TimerRing from "@/components/TimerRing";
 import ShareImage from "@/components/ShareImage";
@@ -38,6 +39,10 @@ export default function DayStack({ userId }: DayStackProps) {
     cards, loading: taskLoading,
     addTask, updateTask, deleteTask, fetchWeek, fetchDate,
   } = useTasks(userId);
+  const {
+    summary: weeklySummaryData, loading: weeklyLoading,
+    fetchSummary: fetchWeeklySummary, fetchLatest: fetchLatestSummary,
+  } = useWeeklySummary(userId);
 
   const [view, setView] = useState<ViewMode>("today");
   const [showCatEditor, setShowCatEditor] = useState(false);
@@ -149,6 +154,13 @@ export default function DayStack({ userId }: DayStackProps) {
       fetchWeek().then(setWeekTasks);
     }
   }, [view, fetchWeek]);
+
+  // Fetch latest weekly summary when switching to summary
+  useEffect(() => {
+    if (view === "summary") {
+      fetchLatestSummary();
+    }
+  }, [view, fetchLatestSummary]);
 
   const getCat = (id: string) => getCatFromList(categories, id);
 
@@ -1169,39 +1181,176 @@ export default function DayStack({ userId }: DayStackProps) {
               <WeeklyDNA categories={categories} weekTasks={weekTasks} />
             </div>
 
-            {/* AI Insight — 準備中 */}
-            <div
-              style={{
+            {/* AI Weekly Insight */}
+            {weeklyLoading ? (
+              <div style={{
                 padding: 20, borderRadius: 16,
                 background: "rgba(255,255,255,0.02)",
                 border: "1px solid rgba(255,255,255,0.06)",
-                position: "relative", overflow: "hidden",
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                <span style={{ fontSize: 13, fontWeight: 700, color: "#888" }}>🤖 AI振り返り</span>
-                <span
-                  style={{
-                    padding: "2px 8px", borderRadius: 6, fontSize: 10, fontWeight: 700,
-                    background: "rgba(255,255,255,0.06)", color: "#666", letterSpacing: 0.5,
-                  }}
-                >
-                  準備中
-                </span>
+                textAlign: "center", color: "#555", fontSize: 13,
+              }}>
+                読み込み中...
               </div>
-              <div style={{ fontSize: 13, lineHeight: 1.8, color: "#555" }}>
-                AIがあなたの1日を分析し、働き方の傾向や改善ポイントを自動でフィードバックします。
-                API連携の準備が整い次第、利用可能になります。
-              </div>
+            ) : weeklySummaryData ? (
               <div
                 style={{
-                  position: "absolute", top: 0, left: 0, right: 0, bottom: 0,
-                  background:
-                    "repeating-linear-gradient(135deg, transparent, transparent 10px, rgba(255,255,255,0.01) 10px, rgba(255,255,255,0.01) 20px)",
-                  pointerEvents: "none",
+                  padding: 24, borderRadius: 20,
+                  background: "rgba(255,255,255,0.03)",
+                  border: "1px solid rgba(255,255,255,0.06)",
                 }}
-              />
-            </div>
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: "#ccc" }}>🤖 AI週次レポート</span>
+                  <span style={{
+                    padding: "2px 8px", borderRadius: 6, fontSize: 10, fontWeight: 700,
+                    background: "rgba(78,205,196,0.15)", color: "#4ECDC4", letterSpacing: 0.5,
+                  }}>
+                    {weeklySummaryData.weekStart}〜
+                  </span>
+                </div>
+
+                {/* Overall stats */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 16 }}>
+                  {[
+                    { label: "総タスク", value: `${weeklySummaryData.totalTasks}件` },
+                    { label: "総稼働", value: fmtMin(weeklySummaryData.totalMinutes) },
+                    { label: "日平均", value: fmtMin(weeklySummaryData.dailyAvgMinutes) },
+                  ].map((m, i) => (
+                    <div key={i} style={{
+                      padding: "12px 10px", borderRadius: 12, textAlign: "center",
+                      background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.04)",
+                    }}>
+                      <div style={{ fontSize: 9, color: "#666", marginBottom: 4, textTransform: "uppercase", letterSpacing: 0.5 }}>{m.label}</div>
+                      <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: -0.5 }}>{m.value}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Category breakdown bar */}
+                <div style={{ marginBottom: 16 }}>
+                  <div style={{ fontSize: 11, color: "#666", marginBottom: 8, fontWeight: 600 }}>カテゴリ配分</div>
+                  <div style={{ display: "flex", height: 32, borderRadius: 10, overflow: "hidden", gap: 2, marginBottom: 10 }}>
+                    {weeklySummaryData.categoryBreakdown.map((c, i) => (
+                      <div key={i} style={{
+                        flex: c.pct, background: `linear-gradient(180deg, ${c.color} 0%, ${c.color}aa 100%)`,
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        fontSize: 11, fontWeight: 700, color: "#000", borderRadius: 3,
+                        minWidth: c.pct > 10 ? "auto" : 0, transition: "flex 0.5s ease",
+                      }}>
+                        {c.pct > 14 ? `${c.icon} ${c.pct}%` : ""}
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 14px" }}>
+                    {weeklySummaryData.categoryBreakdown.map((c, i) => (
+                      <div key={i} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <div style={{ width: 8, height: 8, borderRadius: 2, background: c.color }} />
+                        <span style={{ fontSize: 11, color: "#aaa" }}>{c.label}</span>
+                        <span style={{ fontSize: 10, color: "#555" }}>{fmtMin(c.minutes)} ({c.pct}%)</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Daily breakdown */}
+                <div style={{ marginBottom: 16 }}>
+                  <div style={{ fontSize: 11, color: "#666", marginBottom: 8, fontWeight: 600 }}>日別推移</div>
+                  {weeklySummaryData.dailyBreakdown.map((d, i) => {
+                    const maxMin = Math.max(...weeklySummaryData.dailyBreakdown.map((x) => x.minutes));
+                    const barPct = maxMin > 0 ? (d.minutes / maxMin) * 100 : 0;
+                    return (
+                      <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+                        <span style={{ fontSize: 11, color: "#666", width: 24, textAlign: "right", flexShrink: 0 }}>{d.dayLabel}</span>
+                        <div style={{ flex: 1, height: 18, borderRadius: 6, background: "rgba(255,255,255,0.03)", overflow: "hidden" }}>
+                          <div style={{
+                            width: `${barPct}%`, height: "100%", borderRadius: 6,
+                            background: d.minutes > 600 ? "linear-gradient(90deg, #FF6B6B, #FF6B6Baa)" : "linear-gradient(90deg, #4ECDC4, #4ECDC4aa)",
+                            transition: "width 0.5s ease",
+                          }} />
+                        </div>
+                        <span style={{ fontSize: 10, color: "#555", width: 50, flexShrink: 0, textAlign: "right" }}>{fmtMin(d.minutes)}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Project breakdown */}
+                {weeklySummaryData.projectBreakdown.length > 0 && (
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ fontSize: 11, color: "#666", marginBottom: 8, fontWeight: 600 }}>プロジェクト別</div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      {weeklySummaryData.projectBreakdown.map((p, i) => (
+                        <div key={i} style={{
+                          padding: "6px 12px", borderRadius: 8,
+                          background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)",
+                          fontSize: 11, color: "#aaa",
+                        }}>
+                          <span style={{ fontWeight: 600 }}>{p.name}</span>
+                          <span style={{ color: "#555", marginLeft: 6 }}>{fmtMin(p.minutes)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Insights */}
+                {weeklySummaryData.insights.length > 0 && (
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ fontSize: 11, color: "#666", marginBottom: 8, fontWeight: 600 }}>分析</div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      {weeklySummaryData.insights.map((insight, i) => (
+                        <div key={i} style={{
+                          padding: "10px 14px", borderRadius: 10,
+                          background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.04)",
+                          fontSize: 12, lineHeight: 1.7, color: "#999",
+                        }}>
+                          {insight}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Suggestions */}
+                {weeklySummaryData.suggestions.length > 0 && (
+                  <div>
+                    <div style={{ fontSize: 11, color: "#666", marginBottom: 8, fontWeight: 600 }}>来週への提案</div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      {weeklySummaryData.suggestions.map((suggestion, i) => (
+                        <div key={i} style={{
+                          padding: "10px 14px", borderRadius: 10,
+                          background: "rgba(78,205,196,0.05)", border: "1px solid rgba(78,205,196,0.1)",
+                          fontSize: 12, lineHeight: 1.7, color: "#4ECDC4",
+                        }}>
+                          💡 {suggestion}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div
+                style={{
+                  padding: 20, borderRadius: 16,
+                  background: "rgba(255,255,255,0.02)",
+                  border: "1px solid rgba(255,255,255,0.06)",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: "#888" }}>🤖 AI週次レポート</span>
+                  <span style={{
+                    padding: "2px 8px", borderRadius: 6, fontSize: 10, fontWeight: 700,
+                    background: "rgba(255,255,255,0.06)", color: "#666", letterSpacing: 0.5,
+                  }}>
+                    未生成
+                  </span>
+                </div>
+                <div style={{ fontSize: 13, lineHeight: 1.8, color: "#555" }}>
+                  週次のAI分析レポートはまだありません。週末にレポートが生成されます。
+                </div>
+              </div>
+            )}
           </div>
         )}
 

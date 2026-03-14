@@ -100,6 +100,33 @@ create policy "daystack_tasks: delete own"
 create index if not exists daystack_tasks_user_date_idx
   on public.daystack_tasks (user_id, date);
 
--- 4. Realtime有効化
+-- 4. Weekly Summaries テーブル（AI分析結果を格納）
+create table if not exists public.daystack_weekly_summaries (
+  id serial primary key,
+  user_id uuid references auth.users on delete cascade not null,
+  week_start text not null,  -- "YYYY-MM-DD" (Monday)
+  summary jsonb not null,
+  created_at timestamptz default now(),
+  unique(user_id, week_start)
+);
+
+alter table public.daystack_weekly_summaries enable row level security;
+
+create policy "daystack_weekly_summaries: read own"
+  on public.daystack_weekly_summaries for select
+  using (auth.uid() = user_id);
+
+create policy "daystack_weekly_summaries: insert own"
+  on public.daystack_weekly_summaries for insert
+  with check (auth.uid() = user_id);
+
+create policy "daystack_weekly_summaries: update own"
+  on public.daystack_weekly_summaries for update
+  using (auth.uid() = user_id);
+
+create index if not exists daystack_weekly_summaries_user_week_idx
+  on public.daystack_weekly_summaries (user_id, week_start);
+
+-- 5. Realtime有効化
 alter publication supabase_realtime add table public.daystack_categories;
 alter publication supabase_realtime add table public.daystack_tasks;
