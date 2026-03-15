@@ -23,6 +23,9 @@ interface ActiveTimer {
   title: string;
   startTime: Date;
   elapsed: number;
+  paused: boolean;
+  totalPausedMs: number;   // 累積一時停止時間（ミリ秒）
+  pauseStartTime: number | null; // 一時停止開始時刻（Date.now()）
 }
 
 interface DayStackProps {
@@ -124,7 +127,7 @@ export default function DayStack({ userId }: DayStackProps) {
   useEffect(() => {
     if (hasActiveTimers) {
       intervalRef.current = setInterval(() => {
-        setActiveTimers(prev => prev.map(t => ({ ...t, elapsed: t.elapsed + 1 })));
+        setActiveTimers(prev => prev.map(t => t.paused ? t : { ...t, elapsed: t.elapsed + 1 }));
       }, 1000);
     } else {
       if (intervalRef.current) clearInterval(intervalRef.current);
@@ -172,10 +175,27 @@ export default function DayStack({ userId }: DayStackProps) {
       title: newTimerTitle,
       startTime: new Date(),
       elapsed: 0,
+      paused: false,
+      totalPausedMs: 0,
+      pauseStartTime: null,
     };
     setActiveTimers(prev => [...prev, newTimer]);
     setFocusedTimerId(id);
     setNewTimerTitle("");
+  };
+
+  const pauseTimer = (timerId: number) => {
+    setActiveTimers(prev => prev.map(t =>
+      t.id === timerId ? { ...t, paused: true, pauseStartTime: Date.now() } : t
+    ));
+  };
+
+  const resumeTimer = (timerId: number) => {
+    setActiveTimers(prev => prev.map(t => {
+      if (t.id !== timerId || !t.paused) return t;
+      const pausedMs = t.pauseStartTime ? Date.now() - t.pauseStartTime : 0;
+      return { ...t, paused: false, totalPausedMs: t.totalPausedMs + pausedMs, pauseStartTime: null };
+    }));
   };
 
   const stopTimer = (timerId?: number) => {
@@ -184,8 +204,10 @@ export default function DayStack({ userId }: DayStackProps) {
     if (!timer) return;
 
     const now = new Date();
-    // 壁時計ベースで正確な経過秒を算出
-    const realSec = Math.round((now.getTime() - timer.startTime.getTime()) / 1000);
+    // 壁時計ベースで正確な経過秒を算出（一時停止時間を除外）
+    const currentPauseMs = timer.paused && timer.pauseStartTime ? Date.now() - timer.pauseStartTime : 0;
+    const totalPaused = timer.totalPausedMs + currentPauseMs;
+    const realSec = Math.round((now.getTime() - timer.startTime.getTime() - totalPaused) / 1000);
     const minutes = Math.max(1, Math.round(realSec / 60));
     const startStr = timer.startTime.toTimeString().slice(0, 5);
     const endStr = now.toTimeString().slice(0, 5);
@@ -526,7 +548,7 @@ export default function DayStack({ userId }: DayStackProps) {
                         <div key={timer.id} style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
                           {/* Ring + overlay */}
                           <div style={{ position: "relative", width: ringSize, height: ringSize, marginBottom: 10 }}>
-                            <TimerRing elapsed={timer.elapsed} isRunning={true} color={tCat.color} size={ringSize} />
+                            <TimerRing elapsed={timer.elapsed} isRunning={!timer.paused} color={tCat.color} size={ringSize} />
                             <div
                               style={{
                                 position: "absolute", top: "50%", left: "50%",
@@ -536,12 +558,23 @@ export default function DayStack({ userId }: DayStackProps) {
                               <div
                                 style={{
                                   fontSize, fontWeight: 800, letterSpacing: -1,
-                                  fontVariantNumeric: "tabular-nums", color: "#fff",
+                                  fontVariantNumeric: "tabular-nums",
+                                  color: timer.paused ? "#888" : "#fff",
+                                  transition: "color 0.3s",
                                 }}
                               >
                                 {fmtTime(timer.elapsed)}
                               </div>
-                              <div style={{ fontSize: labelSize, color: tCat.color, marginTop: 2, fontWeight: 600 }}>
+                              {timer.paused && (
+                                <div style={{ fontSize: labelSize, color: "#888", marginTop: 1, fontWeight: 600 }}>
+                                  一時停止中
+                                </div>
+                              )}
+                              <div style={{
+                                fontSize: labelSize,
+                                color: timer.paused ? tCat.color + "80" : tCat.color,
+                                marginTop: 2, fontWeight: 600, transition: "color 0.3s",
+                              }}>
                                 {tCat.icon} {tCat.label}
                               </div>
                             </div>
@@ -569,25 +602,44 @@ export default function DayStack({ userId }: DayStackProps) {
                             }}
                           />
 
-                          {/* STOP button per timer */}
-                          <button
-                            onClick={() => stopTimer(timer.id)}
-                            style={{
-                              marginTop: 10,
-                              width: activeTimers.length === 1 ? 180 : 120,
-                              padding: activeTimers.length === 1 ? "14px 0" : "10px 0",
-                              borderRadius: activeTimers.length === 1 ? 16 : 12,
-                              border: "none", cursor: "pointer",
-                              fontSize: activeTimers.length === 1 ? 16 : 13,
-                              fontWeight: 800, letterSpacing: 1, transition: "all 0.3s",
-                              background: "linear-gradient(135deg, #FF6B6B, #ee5a24)",
-                              color: "#000",
-                              boxShadow: `0 8px 32px rgba(255,107,107,${pulse ? 0.4 : 0.2})`,
-                              transform: pulse ? "scale(1.02)" : "scale(1)",
-                            }}
-                          >
-                            ■  STOP
-                          </button>
+                          {/* Pause/Resume + STOP buttons */}
+                          <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                            <button
+                              onClick={() => timer.paused ? resumeTimer(timer.id) : pauseTimer(timer.id)}
+                              style={{
+                                width: activeTimers.length === 1 ? 80 : 54,
+                                padding: activeTimers.length === 1 ? "14px 0" : "10px 0",
+                                borderRadius: activeTimers.length === 1 ? 16 : 12,
+                                border: "none", cursor: "pointer",
+                                fontSize: activeTimers.length === 1 ? 16 : 13,
+                                fontWeight: 800, transition: "all 0.3s",
+                                background: timer.paused
+                                  ? "linear-gradient(135deg, #4ECDC4, #44B09E)"
+                                  : "rgba(255,255,255,0.08)",
+                                color: timer.paused ? "#000" : "#aaa",
+                                boxShadow: timer.paused ? "0 4px 16px rgba(78,205,196,0.25)" : "none",
+                              }}
+                            >
+                              {timer.paused ? "▶" : "❚❚"}
+                            </button>
+                            <button
+                              onClick={() => stopTimer(timer.id)}
+                              style={{
+                                width: activeTimers.length === 1 ? 96 : 62,
+                                padding: activeTimers.length === 1 ? "14px 0" : "10px 0",
+                                borderRadius: activeTimers.length === 1 ? 16 : 12,
+                                border: "none", cursor: "pointer",
+                                fontSize: activeTimers.length === 1 ? 16 : 13,
+                                fontWeight: 800, letterSpacing: 1, transition: "all 0.3s",
+                                background: "linear-gradient(135deg, #FF6B6B, #ee5a24)",
+                                color: "#000",
+                                boxShadow: `0 8px 32px rgba(255,107,107,${pulse ? 0.4 : 0.2})`,
+                                transform: pulse ? "scale(1.02)" : "scale(1)",
+                              }}
+                            >
+                              ■ STOP
+                            </button>
+                          </div>
                         </div>
                       );
                     })}
