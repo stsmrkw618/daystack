@@ -77,6 +77,8 @@ export default function DayStack({ userId }: DayStackProps) {
   const [summaryDate, setSummaryDate] = useState(todayStr());
   const [summaryCards, setSummaryCards] = useState<TaskCard[]>([]);
   const [summaryLoading, setSummaryLoading] = useState(false);
+  const [showSummaryManual, setShowSummaryManual] = useState(false);
+  const [summaryHoveredCard, setSummaryHoveredCard] = useState<number | null>(null);
 
   // Weekly data
   const [weekTasks, setWeekTasks] = useState<TaskCard[]>([]);
@@ -251,6 +253,68 @@ export default function DayStack({ userId }: DayStackProps) {
     setManualStart("");
     setManualEnd("");
     setShowManual(false);
+  };
+
+  const submitSummaryManual = () => {
+    if (!manualStart || !manualEnd) return;
+    const [sh, sm] = manualStart.split(":").map(Number);
+    const [eh, em] = manualEnd.split(":").map(Number);
+    let diff = (eh * 60 + em) - (sh * 60 + sm);
+    if (diff <= 0) diff += 24 * 60;
+    const minutes = Math.max(1, diff);
+    const cat = getCat(manualCategory);
+    const newTask = {
+      id: Date.now(),
+      title: manualTitle.trim() || cat.label,
+      category: manualCategory,
+      minutes,
+      startTime: manualStart,
+      endTime: manualEnd,
+      date: summaryDate,
+    };
+    addTask(newTask);
+    // Optimistic update for non-today dates
+    if (summaryDate !== todayStr()) {
+      setSummaryCards(prev => [...prev, { ...newTask, date: summaryDate }].sort((a, b) => a.startTime.localeCompare(b.startTime)));
+    }
+    setManualTitle("");
+    setManualCategory("deepwork");
+    setManualStart("");
+    setManualEnd("");
+    setShowSummaryManual(false);
+  };
+
+  const saveSummaryEdit = (id: number) => {
+    const [sh, sm] = editStart.split(":").map(Number);
+    const [eh, em] = editEnd.split(":").map(Number);
+    let diff = (eh * 60 + em) - (sh * 60 + sm);
+    if (diff <= 0) diff += 24 * 60;
+    const minutes = Math.max(1, diff);
+    const updates = {
+      title: editTitle.trim() || getCat(editCategory).label,
+      category: editCategory,
+      startTime: editStart,
+      endTime: editEnd,
+      minutes,
+    };
+    updateTask(id, updates);
+    // Optimistic update for non-today dates
+    if (summaryDate !== todayStr()) {
+      setSummaryCards(prev => {
+        const next = prev.map(c => c.id === id ? { ...c, ...updates } : c);
+        next.sort((a, b) => a.startTime.localeCompare(b.startTime));
+        return next;
+      });
+    }
+    setEditingId(null);
+  };
+
+  const removeSummaryCard = (id: number) => {
+    deleteTask(id);
+    // Optimistic update for non-today dates
+    if (summaryDate !== todayStr()) {
+      setSummaryCards(prev => prev.filter(c => c.id !== id));
+    }
   };
 
   const removeCard = (id: number) => deleteTask(id);
@@ -1086,6 +1150,114 @@ export default function DayStack({ userId }: DayStackProps) {
               )}
             </div>
 
+            {/* Add task button */}
+            <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
+              <button
+                onClick={() => setShowSummaryManual((v) => !v)}
+                style={{
+                  padding: "4px 10px", borderRadius: 8, border: "none",
+                  background: showSummaryManual ? "rgba(78,205,196,0.15)" : "rgba(255,255,255,0.06)",
+                  color: showSummaryManual ? "#4ECDC4" : "#888",
+                  fontSize: 11, fontWeight: 600, cursor: "pointer",
+                  transition: "all 0.2s",
+                }}
+              >
+                ＋ 手動で追加
+              </button>
+            </div>
+
+            {/* Summary manual entry form */}
+            {showSummaryManual && (
+              <div
+                style={{
+                  marginBottom: 12, padding: 16, borderRadius: 14,
+                  background: "rgba(255,255,255,0.03)",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                }}
+              >
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 12 }}>
+                  {categories.map((cat) => (
+                    <button
+                      key={cat.id}
+                      onClick={() => setManualCategory(cat.id)}
+                      style={{
+                        padding: "5px 10px", borderRadius: 14, border: "none",
+                        cursor: "pointer", fontSize: 11, fontWeight: 600,
+                        transition: "all 0.2s",
+                        background: manualCategory === cat.id ? cat.color + "25" : "rgba(255,255,255,0.04)",
+                        color: manualCategory === cat.id ? cat.color : "#666",
+                      }}
+                    >
+                      {cat.icon} {cat.label}
+                    </button>
+                  ))}
+                </div>
+                <input
+                  value={manualTitle}
+                  onChange={(e) => setManualTitle(e.target.value)}
+                  placeholder="タスク名（省略可）"
+                  style={{
+                    width: "100%", padding: "9px 12px", borderRadius: 10,
+                    border: "1px solid rgba(255,255,255,0.08)",
+                    background: "rgba(0,0,0,0.3)", color: "#fff",
+                    fontSize: 13, outline: "none", marginBottom: 10, boxSizing: "border-box",
+                  }}
+                />
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+                  <input
+                    type="time"
+                    value={manualStart}
+                    onChange={(e) => setManualStart(e.target.value)}
+                    style={{
+                      flex: 1, padding: "8px 10px", borderRadius: 10,
+                      border: "1px solid rgba(255,255,255,0.08)",
+                      background: "rgba(0,0,0,0.3)", color: "#fff",
+                      fontSize: 13, outline: "none",
+                    }}
+                  />
+                  <span style={{ color: "#555", fontSize: 13 }}>→</span>
+                  <input
+                    type="time"
+                    value={manualEnd}
+                    onChange={(e) => setManualEnd(e.target.value)}
+                    style={{
+                      flex: 1, padding: "8px 10px", borderRadius: 10,
+                      border: "1px solid rgba(255,255,255,0.08)",
+                      background: "rgba(0,0,0,0.3)", color: "#fff",
+                      fontSize: 13, outline: "none",
+                    }}
+                  />
+                </div>
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                  <button
+                    onClick={() => { setShowSummaryManual(false); setManualTitle(""); setManualStart(""); setManualEnd(""); }}
+                    style={{
+                      padding: "8px 16px", borderRadius: 10, border: "none",
+                      background: "rgba(255,255,255,0.06)", color: "#888",
+                      fontSize: 12, fontWeight: 600, cursor: "pointer",
+                    }}
+                  >
+                    キャンセル
+                  </button>
+                  <button
+                    onClick={submitSummaryManual}
+                    disabled={!manualStart || !manualEnd}
+                    style={{
+                      padding: "8px 20px", borderRadius: 10, border: "none",
+                      background: manualStart && manualEnd
+                        ? "linear-gradient(135deg, #4ECDC4, #44B09E)"
+                        : "rgba(255,255,255,0.06)",
+                      color: manualStart && manualEnd ? "#000" : "#555",
+                      fontSize: 12, fontWeight: 700, cursor: manualStart && manualEnd ? "pointer" : "default",
+                      transition: "all 0.2s",
+                    }}
+                  >
+                    追加
+                  </button>
+                </div>
+              </div>
+            )}
+
             {summaryLoading ? (
               <div style={{ textAlign: "center", padding: "40px 0", color: "#555", fontSize: 13 }}>
                 読み込み中...
@@ -1150,8 +1322,121 @@ export default function DayStack({ userId }: DayStackProps) {
                     />
                     {summaryCards.map((card, i) => {
                       const cat = getCat(card.category);
+                      const isSummaryEditing = editingId === card.id;
+                      const isSummaryHovered = summaryHoveredCard === card.id;
+
+                      if (isSummaryEditing) {
+                        const editCat = getCat(editCategory);
+                        return (
+                          <div key={card.id} style={{ position: "relative", marginBottom: i < summaryCards.length - 1 ? 16 : 0 }}>
+                            <div
+                              style={{
+                                position: "absolute", left: -18, top: 6,
+                                width: 10, height: 10, borderRadius: "50%",
+                                background: editCat.color, border: "2px solid #0d0d14",
+                              }}
+                            />
+                            <div
+                              style={{
+                                padding: 14, borderRadius: 12,
+                                background: "rgba(255,255,255,0.04)",
+                                border: `1px solid ${editCat.color}33`,
+                              }}
+                            >
+                              <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 10 }}>
+                                {categories.map((c) => (
+                                  <button
+                                    key={c.id}
+                                    onClick={() => setEditCategory(c.id)}
+                                    style={{
+                                      padding: "4px 10px", borderRadius: 14, border: "none",
+                                      cursor: "pointer", fontSize: 11, fontWeight: 600,
+                                      transition: "all 0.2s",
+                                      background: editCategory === c.id ? c.color + "25" : "rgba(255,255,255,0.04)",
+                                      color: editCategory === c.id ? c.color : "#666",
+                                    }}
+                                  >
+                                    {c.icon} {c.label}
+                                  </button>
+                                ))}
+                              </div>
+                              <input
+                                value={editTitle}
+                                onChange={(e) => setEditTitle(e.target.value)}
+                                placeholder="タスク名（省略可）"
+                                autoFocus
+                                style={{
+                                  width: "100%", padding: "8px 12px", borderRadius: 10,
+                                  border: `1px solid ${editCat.color}33`,
+                                  background: "rgba(0,0,0,0.3)", color: "#fff",
+                                  fontSize: 13, outline: "none", marginBottom: 10, boxSizing: "border-box",
+                                }}
+                              />
+                              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+                                <input
+                                  type="time"
+                                  value={editStart}
+                                  onChange={(e) => setEditStart(e.target.value)}
+                                  style={{
+                                    flex: 1, padding: "7px 10px", borderRadius: 10,
+                                    border: "1px solid rgba(255,255,255,0.08)",
+                                    background: "rgba(0,0,0,0.3)", color: "#fff",
+                                    fontSize: 13, outline: "none",
+                                  }}
+                                />
+                                <span style={{ color: "#555", fontSize: 13 }}>→</span>
+                                <input
+                                  type="time"
+                                  value={editEnd}
+                                  onChange={(e) => setEditEnd(e.target.value)}
+                                  style={{
+                                    flex: 1, padding: "7px 10px", borderRadius: 10,
+                                    border: "1px solid rgba(255,255,255,0.08)",
+                                    background: "rgba(0,0,0,0.3)", color: "#fff",
+                                    fontSize: 13, outline: "none",
+                                  }}
+                                />
+                              </div>
+                              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                                <button
+                                  onClick={cancelEdit}
+                                  style={{
+                                    padding: "7px 14px", borderRadius: 10, border: "none",
+                                    background: "rgba(255,255,255,0.06)", color: "#888",
+                                    fontSize: 12, fontWeight: 600, cursor: "pointer",
+                                  }}
+                                >
+                                  キャンセル
+                                </button>
+                                <button
+                                  onClick={() => saveSummaryEdit(card.id)}
+                                  disabled={!editStart || !editEnd}
+                                  style={{
+                                    padding: "7px 18px", borderRadius: 10, border: "none",
+                                    background: editStart && editEnd
+                                      ? "linear-gradient(135deg, #4ECDC4, #44B09E)"
+                                      : "rgba(255,255,255,0.06)",
+                                    color: editStart && editEnd ? "#000" : "#555",
+                                    fontSize: 12, fontWeight: 700,
+                                    cursor: editStart && editEnd ? "pointer" : "default",
+                                    transition: "all 0.2s",
+                                  }}
+                                >
+                                  保存
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      }
+
                       return (
-                        <div key={card.id} style={{ position: "relative", marginBottom: i < summaryCards.length - 1 ? 16 : 0 }}>
+                        <div
+                          key={card.id}
+                          onMouseEnter={() => setSummaryHoveredCard(card.id)}
+                          onMouseLeave={() => setSummaryHoveredCard(null)}
+                          style={{ position: "relative", marginBottom: i < summaryCards.length - 1 ? 16 : 0 }}
+                        >
                           <div
                             style={{
                               position: "absolute", left: -18, top: 6,
@@ -1159,11 +1444,41 @@ export default function DayStack({ userId }: DayStackProps) {
                               background: cat.color, border: "2px solid #0d0d14",
                             }}
                           />
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                             <span style={{ fontSize: 13, fontWeight: 600 }}>{card.title}</span>
-                            <span style={{ fontSize: 11, color: "#555", flexShrink: 0, marginLeft: 8 }}>
-                              {fmtMin(card.minutes)}
-                            </span>
+                            <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0, marginLeft: 8 }}>
+                              <span style={{ fontSize: 11, color: "#555" }}>
+                                {fmtMin(card.minutes)}
+                              </span>
+                              <button
+                                onClick={() => startEdit(card)}
+                                title="編集"
+                                style={{
+                                  width: 20, height: 20, borderRadius: 5, border: "none",
+                                  background: isSummaryHovered ? "rgba(78,205,196,0.12)" : "transparent",
+                                  color: isSummaryHovered ? "#4ECDC4" : "transparent",
+                                  cursor: "pointer", fontSize: 11,
+                                  display: "flex", alignItems: "center", justifyContent: "center",
+                                  transition: "all 0.2s",
+                                }}
+                              >
+                                ✎
+                              </button>
+                              <button
+                                onClick={() => removeSummaryCard(card.id)}
+                                title="削除"
+                                style={{
+                                  width: 20, height: 20, borderRadius: 5, border: "none",
+                                  background: isSummaryHovered ? "rgba(255,107,107,0.12)" : "transparent",
+                                  color: isSummaryHovered ? "#FF6B6B" : "transparent",
+                                  cursor: "pointer", fontSize: 12,
+                                  display: "flex", alignItems: "center", justifyContent: "center",
+                                  transition: "all 0.2s",
+                                }}
+                              >
+                                ×
+                              </button>
+                            </div>
                           </div>
                           <div style={{ fontSize: 11, color: "#555", marginTop: 2 }}>
                             {card.startTime} → {card.endTime}
