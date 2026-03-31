@@ -15,6 +15,7 @@ interface DbWeeklySummary {
 export function useWeeklySummary(userId: string) {
   const [summary, setSummary] = useState<WeeklySummary | null>(null);
   const [loading, setLoading] = useState(false);
+  const [availableWeeks, setAvailableWeeks] = useState<string[]>([]);
 
   const fetchSummary = useCallback(
     async (weekStart: string): Promise<WeeklySummary | null> => {
@@ -64,5 +65,23 @@ export function useWeeklySummary(userId: string) {
     return row.summary;
   }, [userId]);
 
-  return { summary, loading, fetchSummary, fetchLatest };
+  const fetchAvailableWeeks = useCallback(async (): Promise<string[]> => {
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from("daystack_weekly_summaries")
+      .select("week_start")
+      .eq("user_id", userId)
+      .order("week_start", { ascending: false });
+
+    if (error || !data) {
+      setAvailableWeeks([]);
+      return [];
+    }
+
+    const weeks = data.map((d: { week_start: string }) => d.week_start);
+    setAvailableWeeks(weeks);
+    return weeks;
+  }, [userId]);
+
+  return { summary, loading, availableWeeks, fetchSummary, fetchLatest, fetchAvailableWeeks };
 }
