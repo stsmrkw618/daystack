@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import {
   Category, TaskCard, WeeklySummary,
   fmtTime, fmtMin, getCatFromList, buildCatSummary, todayStr,
+  getMonday, shiftWeek, formatWeekRange,
 } from "@/lib/constants";
 import { useAuth } from "@/lib/hooks/useAuth";
 import { useCategories } from "@/lib/hooks/useCategories";
@@ -44,10 +45,9 @@ export default function DayStack({ userId }: DayStackProps) {
   } = useTasks(userId);
   const {
     summary: weeklySummaryData, loading: weeklyLoading,
-    availableWeeks, fetchSummary: fetchWeeklySummary,
-    fetchLatest: fetchLatestSummary, fetchAvailableWeeks,
+    fetchSummary: fetchWeeklySummary,
   } = useWeeklySummary(userId);
-  const [weeklyReportIndex, setWeeklyReportIndex] = useState(0);
+  const [weeklyReportWeek, setWeeklyReportWeek] = useState(() => getMonday());
 
   const [view, setView] = useState<ViewMode>("today");
   const [showCatEditor, setShowCatEditor] = useState(false);
@@ -162,19 +162,12 @@ export default function DayStack({ userId }: DayStackProps) {
     }
   }, [view, fetchWeek]);
 
-  // Fetch available weeks and latest summary when switching to summary
+  // Fetch weekly summary for the selected week
   useEffect(() => {
     if (view === "summary") {
-      fetchAvailableWeeks().then((weeks) => {
-        setWeeklyReportIndex(0);
-        if (weeks.length > 0) {
-          fetchWeeklySummary(weeks[0]);
-        } else {
-          fetchLatestSummary();
-        }
-      });
+      fetchWeeklySummary(weeklyReportWeek);
     }
-  }, [view, fetchAvailableWeeks, fetchWeeklySummary, fetchLatestSummary]);
+  }, [view, weeklyReportWeek, fetchWeeklySummary]);
 
   const getCat = (id: string) => getCatFromList(categories, id);
 
@@ -1558,79 +1551,53 @@ export default function DayStack({ userId }: DayStackProps) {
             </div>
 
             {/* AI Weekly Insight */}
-            {weeklyLoading ? (
-              <div style={{
-                padding: 20, borderRadius: 16,
-                background: "rgba(255,255,255,0.02)",
+            <div
+              style={{
+                padding: 24, borderRadius: 20,
+                background: "rgba(255,255,255,0.03)",
                 border: "1px solid rgba(255,255,255,0.06)",
-                textAlign: "center", color: "#555", fontSize: 13,
-              }}>
-                読み込み中...
-              </div>
-            ) : weeklySummaryData ? (
-              <div
-                style={{
-                  padding: 24, borderRadius: 20,
-                  background: "rgba(255,255,255,0.03)",
-                  border: "1px solid rgba(255,255,255,0.06)",
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ fontSize: 14, fontWeight: 700, color: "#ccc" }}>🤖 AI週次レポート</span>
-                    <span style={{
-                      padding: "2px 8px", borderRadius: 6, fontSize: 10, fontWeight: 700,
-                      background: "rgba(78,205,196,0.15)", color: "#4ECDC4", letterSpacing: 0.5,
-                    }}>
-                      {weeklySummaryData.weekStart}〜
-                    </span>
-                  </div>
-                  {availableWeeks.length > 1 && (
-                    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                      <button
-                        onClick={() => {
-                          const next = weeklyReportIndex + 1;
-                          if (next < availableWeeks.length) {
-                            setWeeklyReportIndex(next);
-                            fetchWeeklySummary(availableWeeks[next]);
-                          }
-                        }}
-                        disabled={weeklyReportIndex >= availableWeeks.length - 1}
-                        style={{
-                          width: 28, height: 28, borderRadius: 8, border: "1px solid rgba(255,255,255,0.1)",
-                          background: weeklyReportIndex >= availableWeeks.length - 1 ? "transparent" : "rgba(255,255,255,0.05)",
-                          color: weeklyReportIndex >= availableWeeks.length - 1 ? "#333" : "#888",
-                          cursor: weeklyReportIndex >= availableWeeks.length - 1 ? "default" : "pointer",
-                          fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center",
-                        }}
-                      >
-                        ‹
-                      </button>
-                      <span style={{ fontSize: 10, color: "#555", minWidth: 40, textAlign: "center" }}>
-                        {weeklyReportIndex + 1}/{availableWeeks.length}
-                      </span>
-                      <button
-                        onClick={() => {
-                          const prev = weeklyReportIndex - 1;
-                          if (prev >= 0) {
-                            setWeeklyReportIndex(prev);
-                            fetchWeeklySummary(availableWeeks[prev]);
-                          }
-                        }}
-                        disabled={weeklyReportIndex <= 0}
-                        style={{
-                          width: 28, height: 28, borderRadius: 8, border: "1px solid rgba(255,255,255,0.1)",
-                          background: weeklyReportIndex <= 0 ? "transparent" : "rgba(255,255,255,0.05)",
-                          color: weeklyReportIndex <= 0 ? "#333" : "#888",
-                          cursor: weeklyReportIndex <= 0 ? "default" : "pointer",
-                          fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center",
-                        }}
-                      >
-                        ›
-                      </button>
-                    </div>
-                  )}
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: "#ccc" }}>🤖 AI週次レポート</span>
                 </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  <button
+                    onClick={() => setWeeklyReportWeek(w => shiftWeek(w, -1))}
+                    style={{
+                      width: 28, height: 28, borderRadius: 8, border: "1px solid rgba(255,255,255,0.1)",
+                      background: "rgba(255,255,255,0.05)", color: "#888", cursor: "pointer",
+                      fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center",
+                    }}
+                  >
+                    ‹
+                  </button>
+                  <span style={{ fontSize: 11, color: "#aaa", minWidth: 90, textAlign: "center", fontWeight: 600 }}>
+                    {formatWeekRange(weeklyReportWeek)}
+                  </span>
+                  <button
+                    onClick={() => setWeeklyReportWeek(w => shiftWeek(w, 1))}
+                    disabled={weeklyReportWeek >= getMonday()}
+                    style={{
+                      width: 28, height: 28, borderRadius: 8, border: "1px solid rgba(255,255,255,0.1)",
+                      background: weeklyReportWeek >= getMonday() ? "transparent" : "rgba(255,255,255,0.05)",
+                      color: weeklyReportWeek >= getMonday() ? "#333" : "#888",
+                      cursor: weeklyReportWeek >= getMonday() ? "default" : "pointer",
+                      fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center",
+                    }}
+                  >
+                    ›
+                  </button>
+                </div>
+              </div>
+
+              {weeklyLoading ? (
+                <div style={{ textAlign: "center", color: "#555", fontSize: 13, padding: "20px 0" }}>
+                  読み込み中...
+                </div>
+              ) : weeklySummaryData ? (
+                <>
 
                 {/* Overall stats */}
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 16 }}>
@@ -1751,29 +1718,13 @@ export default function DayStack({ userId }: DayStackProps) {
                     </div>
                   </div>
                 )}
-              </div>
-            ) : (
-              <div
-                style={{
-                  padding: 20, borderRadius: 16,
-                  background: "rgba(255,255,255,0.02)",
-                  border: "1px solid rgba(255,255,255,0.06)",
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: "#888" }}>🤖 AI週次レポート</span>
-                  <span style={{
-                    padding: "2px 8px", borderRadius: 6, fontSize: 10, fontWeight: 700,
-                    background: "rgba(255,255,255,0.06)", color: "#666", letterSpacing: 0.5,
-                  }}>
-                    未生成
-                  </span>
+              </>
+              ) : (
+                <div style={{ textAlign: "center", color: "#555", fontSize: 13, padding: "20px 0" }}>
+                  この週のレポートはまだ生成されていません。
                 </div>
-                <div style={{ fontSize: 13, lineHeight: 1.8, color: "#555" }}>
-                  週次のAI分析レポートはまだありません。週末にレポートが生成されます。
-                </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         )}
 

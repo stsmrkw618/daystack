@@ -55,6 +55,28 @@ export const ICON_PALETTE = [
 ];
 
 // ─── Utilities ───
+export const getMonday = (dateStr?: string): string => {
+  const d = dateStr ? new Date(dateStr + "T00:00:00") : new Date();
+  const day = d.getDay();
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+  d.setDate(diff);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+
+export const shiftWeek = (mondayStr: string, delta: number): string => {
+  const d = new Date(mondayStr + "T00:00:00");
+  d.setDate(d.getDate() + delta * 7);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+
+export const formatWeekRange = (mondayStr: string): string => {
+  const mon = new Date(mondayStr + "T00:00:00");
+  const sun = new Date(mon);
+  sun.setDate(sun.getDate() + 6);
+  const f = (d: Date) => `${d.getMonth() + 1}/${d.getDate()}`;
+  return `${f(mon)}〜${f(sun)}`;
+};
+
 export const todayStr = (): string => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
