@@ -126,12 +126,18 @@ export default function DayStack({ userId }: DayStackProps) {
     return () => clearInterval(p);
   }, [isRunning]);
 
-  // Timer tick — updates all active timers
+  // Timer tick — updates all active timers (wall-clock based)
   const hasActiveTimers = isRunning;
   useEffect(() => {
     if (hasActiveTimers) {
       intervalRef.current = setInterval(() => {
-        setActiveTimers(prev => prev.map(t => t.paused ? t : { ...t, elapsed: t.elapsed + 1 }));
+        const now = Date.now();
+        setActiveTimers(prev => prev.map(t => {
+          if (t.paused) return t;
+          const currentPausedMs = t.totalPausedMs;
+          const totalElapsedMs = now - t.startTime.getTime() - currentPausedMs;
+          return { ...t, elapsed: Math.max(0, Math.floor(totalElapsedMs / 1000)) };
+        }));
       }, 1000);
     } else {
       if (intervalRef.current) clearInterval(intervalRef.current);
